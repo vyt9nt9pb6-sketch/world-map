@@ -1,0 +1,11 @@
+# Cloudflare Workers 設定（尚未部署；部署步驟見 README）
+name = "world-map"
+main = "worker/index.js"
+compatibility_date = "2026-10-01"
+
+[assets]
+directory = "./public"
+binding = "ASSETS"
+run_worker_first = ["/api/*"]
+
+# 金鑰不要寫在這裡！請用：npx wrangler secret put AMAP_KEY

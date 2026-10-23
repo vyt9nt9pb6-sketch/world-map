@@ -1,0 +1,22 @@
+{
+  "name": "world-map",
+  "version": "1.0.0",
+  "private": true,
+  "description": "World Map v1 — 高德底圖、搜尋、駕車路線、一鍵導航",
+  "type": "module",
+  "engines": {
+    "node": ">=20"
+  },
+  "scripts": {
+    "start": "node server/server.mjs",
+    "dev": "node --watch server/server.mjs",
+    "test": "node --test \"tests/**/*.test.js\"",
+    "check:secrets": "node scripts/check-secrets.mjs",
+    "check:tiles": "node scripts/check-tiles.mjs",
+    "check:api": "node scripts/api-smoke.mjs",
+    "screenshots": "node scripts/screenshots.mjs"
+  },
+  "devDependencies": {
+    "playwright-core": "^1.64.1"
+  }
+}

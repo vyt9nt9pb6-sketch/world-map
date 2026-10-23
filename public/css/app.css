@@ -1,0 +1,171 @@
+:root {
+  --blue: #1f6feb;
+  --blue-dark: #1758c4;
+  --green: #1a9f53;
+  --red: #e5383b;
+  --orange: #f08c00;
+  --text: #1c1f23;
+  --muted: #6b7280;
+  --line: #e5e7eb;
+  --bg: #ffffff;
+  --shadow: 0 4px 18px rgba(0, 0, 0, 0.16);
+  --safe-top: env(safe-area-inset-top, 0px);
+  --safe-bottom: env(safe-area-inset-bottom, 0px);
+  --safe-left: env(safe-area-inset-left, 0px);
+  --safe-right: env(safe-area-inset-right, 0px);
+  --peek: calc(138px + var(--safe-bottom));
+  --touch: 48px;
+  font-family: -apple-system, BlinkMacSystemFont, 'PingFang TC', 'PingFang SC', 'Noto Sans TC', 'Noto Sans CJK TC', 'Microsoft JhengHei', sans-serif;
+  color: var(--text);
+  -webkit-text-size-adjust: 100%;
+}
+* { box-sizing: border-box; }
+html, body { margin: 0; height: 100%; overflow: hidden; overscroll-behavior: none; background: #f2f2f2; }
+button, input { font: inherit; color: inherit; }
+button { cursor: pointer; -webkit-tap-highlight-color: transparent; }
+svg[aria-hidden="true"] { width: 22px; height: 22px; fill: currentColor; flex: none; } /* 只限介面圖示；不可影響 Leaflet 的 SVG 圖層 */
+.hidden { display: none !important; }
+.muted { color: var(--muted); }
+.small { font-size: 13px; }
+
+#map { position: fixed; inset: 0; z-index: 0; background: #e8eef2; }
+.leaflet-container { font: inherit; }
+.leaflet-control-attribution { font-size: 10px; }
+.leaflet-bottom.leaflet-left, .leaflet-bottom.leaflet-right { margin-bottom: var(--peek); }
+
+/* 浮動按鈕 */
+.fab-group { position: fixed; z-index: 500; display: flex; flex-direction: column; gap: 10px; align-items: flex-end; }
+.top-right { top: calc(12px + var(--safe-top)); right: calc(12px + var(--safe-right)); }
+.bottom-right { right: calc(12px + var(--safe-right)); bottom: calc(var(--sheet-visible, var(--peek)) + 14px); transition: bottom 0.25s ease; }
+.fab {
+  min-width: var(--touch); height: var(--touch); padding: 0 12px; border: 0; border-radius: 14px;
+  background: var(--bg); box-shadow: var(--shadow); display: inline-flex; align-items: center; justify-content: center; gap: 6px;
+  font-size: 15px; font-weight: 600;
+}
+.fab.round { width: 52px; height: 52px; border-radius: 50%; padding: 0; color: var(--blue); }
+.fab.round.active { background: var(--blue); color: #fff; }
+.fab.small { height: 40px; min-width: 40px; font-size: 13px; }
+.fab[aria-pressed='false'] { color: var(--muted); }
+.fab:active { transform: scale(0.96); }
+
+/* 底部面板 */
+.sheet {
+  position: fixed; left: 0; right: 0; bottom: 0; z-index: 600;
+  height: calc(92dvh - var(--safe-top));
+  background: var(--bg); border-radius: 18px 18px 0 0; box-shadow: 0 -4px 24px rgba(0, 0, 0, 0.16);
+  padding: 0 calc(14px + var(--safe-right)) calc(14px + var(--safe-bottom)) calc(14px + var(--safe-left));
+  transform: translateY(calc(100% - var(--peek)));
+  transition: transform 0.28s cubic-bezier(0.2, 0.8, 0.2, 1);
+  display: flex; flex-direction: column;
+  touch-action: none;
+}
+.sheet[data-snap='half'] { transform: translateY(calc(100% - 52dvh)); }
+.sheet[data-snap='full'] { transform: translateY(0); }
+.sheet.dragging { transition: none; }
+.sheet-handle { height: 26px; display: flex; align-items: center; justify-content: center; flex: none; cursor: grab; }
+.sheet-handle span { width: 44px; height: 5px; border-radius: 3px; background: #d1d5db; }
+.view { display: flex; flex-direction: column; min-height: 0; flex: 1; }
+.results, .route-options { list-style: none; margin: 0; padding: 0; overflow-y: auto; -webkit-overflow-scrolling: touch; touch-action: pan-y; flex: 1; min-height: 0; }
+
+.search-bar { display: flex; align-items: center; gap: 8px; background: #f3f4f6; border-radius: 14px; padding: 0 6px 0 12px; height: 52px; flex: none; }
+.search-bar svg { color: var(--muted); }
+.search-bar input { flex: 1; min-width: 0; border: 0; background: transparent; outline: none; font-size: 17px; height: 100%; }
+.search-bar input::-webkit-search-cancel-button { display: none; }
+.primary-btn, .secondary-btn {
+  border: 0; border-radius: 12px; height: 42px; padding: 0 16px; font-weight: 600; font-size: 16px;
+  display: inline-flex; align-items: center; justify-content: center; gap: 6px; white-space: nowrap;
+}
+.primary-btn { background: var(--blue); color: #fff; }
+.primary-btn:active { background: var(--blue-dark); }
+.secondary-btn { background: #eef2ff; color: var(--blue); }
+.big { height: var(--touch); flex: 1; min-width: 0; }
+.icon-btn { border: 0; background: transparent; width: 40px; height: 40px; border-radius: 50%; font-size: 18px; color: var(--muted); flex: none; }
+.link-btn { border: 0; background: transparent; color: var(--blue); font-weight: 600; font-size: 15px; padding: 10px 4px; min-height: 44px; }
+.route-shortcut { display: flex; gap: 8px; margin-top: 10px; flex: none; }
+.route-shortcut .secondary-btn { height: var(--touch); flex: 1; }
+.status { color: var(--muted); font-size: 14px; padding: 8px 2px; min-height: 0; flex: none; }
+.status:empty { padding: 0; }
+.status.error { color: var(--red); }
+.pick-hint { display: flex; justify-content: space-between; align-items: center; font-weight: 600; color: var(--blue); padding: 0 2px 6px; flex: none; }
+
+.result { display: flex; gap: 12px; align-items: flex-start; padding: 12px 4px; border-bottom: 1px solid var(--line); min-height: 60px; cursor: pointer; }
+.result:active, .result.selected { background: #f5f8ff; }
+.result .badge { flex: none; width: 28px; height: 28px; border-radius: 50%; background: var(--blue); color: #fff; font-size: 13px; font-weight: 700; display: flex; align-items: center; justify-content: center; margin-top: 2px; }
+.result .badge.addr { background: #6366f1; }
+.result .body { flex: 1; min-width: 0; }
+.result .name { font-weight: 600; font-size: 16px; }
+.result .sub { color: var(--muted); font-size: 13px; margin-top: 3px; line-height: 1.4; }
+.result .dist { color: var(--muted); font-size: 13px; flex: none; margin-top: 3px; }
+
+.place-head, .route-head { display: flex; justify-content: space-between; align-items: flex-start; gap: 8px; flex: none; }
+.place-head h2, .route-head h2 { margin: 2px 0 4px; font-size: 20px; }
+.place-head p { margin: 0 0 12px; font-size: 14px; }
+.btn-row { display: flex; gap: 8px; flex: none; margin-top: 8px; }
+
+.stops { display: flex; flex-direction: column; gap: 8px; margin-top: 8px; flex: none; }
+.stop { display: flex; align-items: center; gap: 10px; }
+.stop .dot { flex: none; width: 26px; height: 26px; border-radius: 50%; color: #fff; font-size: 12px; font-weight: 700; display: flex; align-items: center; justify-content: center; }
+.stop .dot.start { background: var(--green); }
+.stop .dot.via { background: var(--orange); }
+.stop .dot.dest { background: var(--red); }
+.stop .field { flex: 1; min-width: 0; height: var(--touch); border-radius: 12px; border: 0; background: #f3f4f6; text-align: left; padding: 0 12px; font-size: 16px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.stop .field.empty { color: var(--muted); }
+.stop-actions { display: flex; justify-content: space-between; flex: none; }
+
+.chips { display: flex; gap: 8px; overflow-x: auto; padding: 4px 0 8px; flex: none; touch-action: pan-x; scrollbar-width: none; }
+.chip { flex: none; border: 1px solid var(--line); background: #fff; border-radius: 999px; height: 40px; padding: 0 14px; font-size: 15px; }
+.chip[aria-checked='true'] { background: var(--blue); border-color: var(--blue); color: #fff; font-weight: 600; }
+
+.route-option { border: 2px solid var(--line); border-radius: 14px; padding: 12px 14px; margin-bottom: 8px; cursor: pointer; }
+.route-option.selected { border-color: var(--blue); background: #f5f8ff; }
+.route-option .top { display: flex; align-items: baseline; gap: 10px; flex-wrap: wrap; }
+.route-option .dur { font-size: 22px; font-weight: 700; }
+.route-option .dist { font-size: 16px; color: var(--muted); }
+.route-option .toll { margin-left: auto; font-size: 16px; font-weight: 600; }
+.route-option .meta { color: var(--muted); font-size: 13px; margin-top: 4px; line-height: 1.5; }
+.route-option .warn { color: var(--red); font-size: 13px; margin-top: 4px; }
+
+/* 地圖標記 */
+.pin { width: 30px; height: 38px; position: relative; }
+.pin span {
+  position: absolute; left: 0; top: 0; width: 30px; height: 30px; border-radius: 50% 50% 50% 0; transform: rotate(-45deg);
+  background: var(--blue); border: 2px solid #fff; box-shadow: 0 2px 6px rgba(0, 0, 0, 0.35);
+}
+.pin b { position: absolute; left: 0; top: 0; width: 30px; height: 30px; line-height: 30px; text-align: center; color: #fff; font-size: 13px; font-weight: 700; }
+.pin.start span { background: var(--green); }
+.pin.dest span { background: var(--red); }
+.pin.via span { background: var(--orange); }
+.pin.addr span { background: #6366f1; }
+.pin.dim { opacity: 0.85; }
+.pin.selected span { background: var(--red); }
+.me-dot { width: 20px; height: 20px; border-radius: 50%; background: var(--blue); border: 3px solid #fff; box-shadow: 0 0 0 2px rgba(31, 111, 235, 0.3), 0 2px 6px rgba(0, 0, 0, 0.3); }
+
+.toast {
+  position: fixed; left: 50%; top: calc(16px + var(--safe-top)); transform: translate(-50%, -150%); z-index: 1000;
+  background: rgba(28, 31, 35, 0.92); color: #fff; padding: 12px 16px; border-radius: 12px; font-size: 15px; max-width: min(90vw, 420px);
+  transition: transform 0.25s ease, opacity 0.25s ease, visibility 0.25s; pointer-events: none; text-align: center;
+}
+.toast { visibility: hidden; opacity: 0; }
+.toast.show { transform: translate(-50%, 0); visibility: visible; opacity: 1; }
+
+/* 桌機：左側固定面板 */
+@media (min-width: 900px) {
+  :root { --peek: 0px; }
+  .sheet {
+    top: 16px; left: 16px; bottom: 16px; right: auto; width: 400px; height: auto; border-radius: 18px;
+    transform: none !important; box-shadow: var(--shadow); padding: 16px;
+  }
+  .sheet-handle { display: none; }
+  .bottom-right { bottom: 28px !important; }
+  .leaflet-bottom.leaflet-left { margin-left: 420px; }
+  .leaflet-bottom.leaflet-left, .leaflet-bottom.leaflet-right { margin-bottom: 0; }
+  .toast { left: calc(50% + 210px); }
+}
+
+/* 手機：導航按鈕放在路線清單上方，面板在半開狀態就按得到 */
+@media (max-width: 899px) {
+  #view-route > * { order: 0; }
+  #nav-buttons { order: 1; margin: 4px 0 10px; }
+  #route-options { order: 2; }
+  #nav-note { order: 3; }
+}

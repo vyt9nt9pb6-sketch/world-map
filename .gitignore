@@ -1,0 +1,16 @@
+# 機密：絕不提交
+.env
+.env.*
+!.env.example
+.dev.vars
+*.pem
+*.key
+
+node_modules/
+.vercel/
+.wrangler/
+*.log
+tunnel.log
+server.log
+.run/
+.DS_Store

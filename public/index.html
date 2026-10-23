@@ -1,0 +1,106 @@
+<!doctype html>
+<html lang="zh-Hant">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, maximum-scale=1, user-scalable=no" />
+    <meta name="theme-color" content="#1f6feb" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+    <meta name="apple-mobile-web-app-title" content="World Map" />
+    <title>World Map</title>
+    <link rel="manifest" href="/manifest.webmanifest" />
+    <link rel="icon" href="/icons/icon.svg" type="image/svg+xml" />
+    <link rel="apple-touch-icon" href="/icons/icon-180.png" />
+    <link rel="stylesheet" href="/vendor/leaflet/leaflet.css" />
+    <link rel="stylesheet" href="/css/app.css" />
+  </head>
+  <body>
+    <div id="map" aria-label="地圖"></div>
+
+    <!-- 右上：圖層切換 -->
+    <div class="fab-group top-right">
+      <button id="btn-layer" class="fab" type="button" aria-label="切換衛星圖" title="切換衛星圖">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 3 2 8l10 5 10-5-10-5Zm-8.2 9L2 13l10 5 10-5-1.8-1L12 16l-8.2-4Zm0 4L2 17l10 5 10-5-1.8-1L12 20l-8.2-4Z"/></svg>
+        <span id="layer-label">衛星</span>
+      </button>
+      <button id="btn-labels" class="fab small hidden" type="button" aria-pressed="true" title="衛星圖上的道路與地名">標註</button>
+    </div>
+
+    <!-- 右下：定位 -->
+    <div class="fab-group bottom-right" id="fab-bottom">
+      <button id="btn-locate" class="fab round" type="button" aria-label="定位到我的位置" title="我的位置">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 8a4 4 0 1 0 0 8 4 4 0 0 0 0-8Zm8.94 3A9 9 0 0 0 13 3.06V1h-2v2.06A9 9 0 0 0 3.06 11H1v2h2.06A9 9 0 0 0 11 20.94V23h2v-2.06A9 9 0 0 0 20.94 13H23v-2h-2.06ZM12 19a7 7 0 1 1 0-14 7 7 0 0 1 0 14Z"/></svg>
+      </button>
+    </div>
+
+    <!-- 底部面板（手機）／側邊面板（桌機） -->
+    <section id="sheet" class="sheet" data-snap="peek" aria-label="搜尋與路線">
+      <div class="sheet-handle" id="sheet-handle" aria-hidden="true"><span></span></div>
+
+      <!-- 搜尋 -->
+      <div id="view-search" class="view">
+        <div id="pick-hint" class="pick-hint hidden">
+          <span id="pick-hint-text">選擇終點</span>
+          <button type="button" id="pick-cancel" class="link-btn">取消</button>
+        </div>
+        <form id="search-form" class="search-bar" role="search" autocomplete="off">
+          <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M15.5 14h-.79l-.28-.27A6.47 6.47 0 0 0 16 9.5 6.5 6.5 0 1 0 9.5 16a6.47 6.47 0 0 0 4.23-1.57l.27.28v.79l5 4.99L20.49 19l-4.99-5Zm-6 0A4.5 4.5 0 1 1 14 9.5 4.49 4.49 0 0 1 9.5 14Z"/></svg>
+          <input id="search-input" type="search" enterkeyhint="search" placeholder="搜尋地點、地址" aria-label="搜尋地點或地址" maxlength="80" />
+          <button type="button" id="search-clear" class="icon-btn hidden" aria-label="清除">✕</button>
+          <button type="submit" class="primary-btn">搜尋</button>
+        </form>
+        <div id="route-shortcut" class="route-shortcut">
+          <button type="button" id="btn-open-route" class="secondary-btn">
+            <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M21.71 11.29 12.71 2.29a1 1 0 0 0-1.42 0l-9 9a1 1 0 0 0 0 1.42l9 9a1 1 0 0 0 1.42 0l9-9a1 1 0 0 0 0-1.42ZM14 14.5V12h-4v3H8v-4a1 1 0 0 1 1-1h5V7.5l3.5 3.5-3.5 3.5Z"/></svg>
+            路線規劃
+          </button>
+        </div>
+        <div id="search-status" class="status" role="status" aria-live="polite"></div>
+        <ul id="results" class="results"></ul>
+      </div>
+
+      <!-- 選中地點 -->
+      <div id="view-place" class="view hidden">
+        <div class="place-head">
+          <div>
+            <h2 id="place-name"></h2>
+            <p id="place-addr" class="muted"></p>
+          </div>
+          <button type="button" id="place-close" class="icon-btn" aria-label="關閉">✕</button>
+        </div>
+        <div class="btn-row">
+          <button type="button" class="primary-btn big" id="place-as-dest">設為終點</button>
+          <button type="button" class="secondary-btn big" id="place-as-start">設為起點</button>
+          <button type="button" class="secondary-btn big" id="place-as-via">加入途經點</button>
+        </div>
+      </div>
+
+      <!-- 路線 -->
+      <div id="view-route" class="view hidden">
+        <div class="route-head">
+          <h2>駕車路線</h2>
+          <button type="button" id="route-close" class="icon-btn" aria-label="關閉路線">✕</button>
+        </div>
+        <div class="stops" id="stops"></div>
+        <div class="stop-actions">
+          <button type="button" id="btn-add-via" class="link-btn">＋ 新增途經點</button>
+          <button type="button" id="btn-swap" class="link-btn">⇅ 起終點互換</button>
+        </div>
+        <div class="chips" id="strategy-chips" role="radiogroup" aria-label="路線偏好"></div>
+        <div id="route-status" class="status" role="status" aria-live="polite"></div>
+        <ul id="route-options" class="route-options"></ul>
+        <div id="nav-buttons" class="btn-row hidden">
+          <button type="button" class="primary-btn big" id="nav-amap">高德地圖導航</button>
+          <button type="button" class="secondary-btn big" id="nav-apple">Apple 地圖</button>
+        </div>
+        <p id="nav-note" class="muted small hidden"></p>
+      </div>
+    </section>
+
+    <div id="toast" class="toast" role="alert" aria-live="assertive"></div>
+
+    <script src="/vendor/leaflet/leaflet.js"></script>
+    <script type="module" src="/js/app.js"></script>
+  </body>
+</html>
