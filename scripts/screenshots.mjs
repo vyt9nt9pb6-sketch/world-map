@@ -6,6 +6,9 @@ import { mkdirSync } from 'node:fs';
 const base = (process.argv[2] || 'http://127.0.0.1:8787').replace(/\/$/, '');
 const out = new URL('../screenshots/', import.meta.url).pathname;
 mkdirSync(out, { recursive: true });
+// 選填：SHOT_PREFIX=deployed- 加在檔名前；SHOT_ONLY=iphone 只拍一種裝置
+const PREFIX = process.env.SHOT_PREFIX || '';
+const ONLY = process.env.SHOT_ONLY || '';
 const CHROME = process.env.CHROME_PATH || '/usr/bin/google-chrome';
 // 模擬 GPS（WGS-84）：連雲港市海州區附近
 const GEO = { longitude: 119.2163, latitude: 34.5983, accuracy: 30 };
@@ -19,6 +22,7 @@ async function waitTiles(page) {
 }
 
 async function run(name, ctxOpts) {
+  if (ONLY && ONLY !== name) return [];
   const ctx = await browser.newContext({ ...ctxOpts, geolocation: GEO, permissions: ['geolocation'], locale: 'zh-TW' });
   const page = await ctx.newPage();
   const errors = [];
@@ -27,14 +31,14 @@ async function run(name, ctxOpts) {
   await page.goto(base + '/', { waitUntil: 'load' });
   await page.waitForSelector('.me-dot', { timeout: 15000 }).catch(() => page.click('#btn-locate'));
   await waitTiles(page);
-  await page.screenshot({ path: `${out}${name}-1-map.png` });
+  await page.screenshot({ path: `${out}${PREFIX}${name}-1-map.png` });
 
   // 搜尋 → 結果清單
   await page.fill('#search-input', '加油站');
   await page.press('#search-input', 'Enter');
   await page.waitForSelector('#results li', { timeout: 20000 });
   await waitTiles(page);
-  await page.screenshot({ path: `${out}${name}-2-search.png` });
+  await page.screenshot({ path: `${out}${PREFIX}${name}-2-search.png` });
 
   // 搜尋南京站 → 設為終點 → 規劃路線
   await page.fill('#search-input', '南京站');
@@ -44,12 +48,12 @@ async function run(name, ctxOpts) {
   await page.click('#place-as-dest');
   await page.waitForSelector('.route-option', { timeout: 30000 });
   await waitTiles(page);
-  await page.screenshot({ path: `${out}${name}-3-route.png` });
+  await page.screenshot({ path: `${out}${PREFIX}${name}-3-route.png` });
 
   // 衛星圖
   await page.click('#btn-layer');
   await waitTiles(page);
-  await page.screenshot({ path: `${out}${name}-4-satellite.png` });
+  await page.screenshot({ path: `${out}${PREFIX}${name}-4-satellite.png` });
 
   const summary = await page.$$eval('.route-option', (els) => els.map((e) => e.querySelector('.top').innerText.replace(/\s+/g, ' ')));
   console.log(`${name}: ${summary.join(' | ')}${errors.length ? '\n  頁面錯誤：' + errors.join('; ') : ''}`);
