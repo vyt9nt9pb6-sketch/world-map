@@ -14,3 +14,4 @@ tunnel.log
 server.log
 .run/
 .DS_Store
+dist/

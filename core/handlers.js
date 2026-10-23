@@ -36,8 +36,9 @@ function json(body, status = 200, extraHeaders = {}) {
   });
 }
 
-function errorResponse(status, code, message, field) {
-  return json({ error: { code, message, ...(field ? { field } : {}) } }, status);
+function errorResponse(status, code, message, field, infocode) {
+  // infocode 是高德公開的錯誤代碼（例如 10009），方便排查；不含任何金鑰或網址
+  return json({ error: { code, message, ...(field ? { field } : {}), ...(infocode ? { infocode } : {}) } }, status);
 }
 
 /** 高德 infocode → 對使用者友善的錯誤（不洩漏任何內部細節） */
@@ -198,7 +199,7 @@ export async function handleApiRequest(request, env, opts = {}) {
     return json(data);
   } catch (err) {
     if (err instanceof ValidationError) return errorResponse(400, 'invalid_param', err.message, err.field);
-    if (err instanceof UpstreamError) return errorResponse(err.status, err.code, err.message);
+    if (err instanceof UpstreamError) return errorResponse(err.status, err.code, err.message, undefined, /^\d{5}$/.test(err.infocode ?? '') ? err.infocode : undefined);
     // 未預期的錯誤：只記錄錯誤類型，不記錄 URL（URL 內含 key）
     console.error('[api] unexpected error:', err?.name || 'Error');
     return errorResponse(500, 'internal', '伺服器發生錯誤');

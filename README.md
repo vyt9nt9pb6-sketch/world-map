@@ -1,5 +1,7 @@
 # World Map v1
 
+**線上版（固定網址）：https://world-map.kwok-worldmap.workers.dev**
+
 給長途自駕用的網頁地圖：高德高清底圖、搜尋、駕車路線（含過路費）、一鍵交給高德地圖／Apple 地圖導航。
 手機（iPhone Safari）優先，桌機也能用；之後可以包成 App。
 
@@ -32,7 +34,9 @@ core/                   後端邏輯（平台無關：標準 Fetch Request → R
   ratelimit.js          每個 IP 的限流
 server/server.mjs       本機 Node 伺服器（靜態檔＋/api）
 api/*.js + vercel.json  Vercel 部署用
-worker/index.js + wrangler.toml  Cloudflare Workers 部署用
+worker/index.js + wrangler.toml  Cloudflare Workers 部署用（wrangler／Static Assets）
+worker/bundled.js       單檔 Worker 入口（靜態檔內嵌；目前線上版使用）
+scripts/build-worker.mjs、scripts/deploy-cloudflare.mjs  打包與重新部署
 tests/                  單元測試（node --test）
 scripts/                驗證腳本（API、圖磚、金鑰檢查、截圖）
 start-tunnel.sh         重新啟動本機伺服器＋Cloudflare 臨時通道
@@ -104,16 +108,28 @@ npm run screenshots        # 無頭 Chrome 截圖（iPhone 390×844@3x、桌機 
 - 注意：Vercel Functions 是多個短暫執行個體，記憶體內的限流只是「盡力而為」；要嚴格限流需另加 Vercel KV／Upstash。
 - 免費方案（Hobby）限個人非商業使用。
 
-### B. Cloudflare Workers（建議）
-- 需要：Cloudflare 帳號（免費方案即可）。
-- 步驟：
+### B. Cloudflare Workers（建議，**目前已部署**）
+- 網址：**https://world-map.kwok-worldmap.workers.dev**（Worker 名稱 `world-map`，帳號的 workers.dev 子網域 `kwok-worldmap`）。
+- 部署方式：**單檔 Worker**。`scripts/build-worker.mjs` 用 esbuild 把 `worker/bundled.js`＋`core/`＋整個 `public/`（base64 內嵌，約 320 KB）打包成 `dist/worker.js`；`worker/bundled.js` 提供和 Workers Static Assets 相同的 `ASSETS.fetch()` 介面，所以 `worker/index.js` 不用改。
+- 綁定：
+  - `AMAP_KEY`：**Secret（secret_text）**，只存在 Cloudflare，不在任何檔案或程式碼裡。
+  - `API_RATE_LIMIT`：Cloudflare Rate Limiting 綁定，每個 IP 每 60 秒最多 60 次 `/api` 請求（同一機房內跨執行個體有效）。另外還有程式內的記憶體限流（每 IP＋全站，盡力而為）。
+- 重新部署（改了前端或後端之後）：
   ```bash
-  npx wrangler login
-  npx wrangler secret put AMAP_KEY       # 互動輸入，不會出現在檔案裡
-  npx wrangler deploy
+  node scripts/deploy-cloudflare.mjs      # 打包，產生 .run/cf-deploy.js（不含金鑰）
   ```
-- `wrangler.toml` 已設定：靜態檔由 Workers Assets 提供、`/api/*` 先進 Worker。
-- 可綁自己的網域；免費方案每天 10 萬次請求。限流同樣是單一執行個體記憶體內的（可再加 Cloudflare 的 Rate Limiting 規則）。
+  然後由 Grok Bot 用 Cloudflare 連接器執行：`execute {"code": "$file:/workspace/world-map/.run/cf-deploy.js"}`。
+  重新部署會保留 `AMAP_KEY` 秘密（`keep_bindings: secret_text`），不需要重設。
+- **設定／更換金鑰（請在 Cloudflare 網頁後台做）**：Workers & Pages → `world-map` → Settings → Variables and Secrets → `AMAP_KEY`（類型 Secret）→ Edit → 貼上高德 Web 服務 Key → Deploy。
+  - Grok Bot 的連接器會自動把看起來像金鑰的字串遮蔽（變成 10 個字元的佔位字），所以無法透過連接器設定真正的金鑰——這是保護機制，不要繞過。
+  - `node scripts/deploy-cloudflare.mjs --secret` 產生的 `.run/set-secret.js` 只適合在有自己 API 權杖、直接呼叫 Cloudflare API 時使用；用完立刻 `shred -u`。
+- 如果之後有 wrangler 權杖，也可以改用標準方式（Static Assets）：
+  ```bash
+  npx wrangler secret put AMAP_KEY       # 互動輸入，不會出現在檔案裡
+  npx wrangler deploy                    # 依 wrangler.toml
+  ```
+- 免費方案每天 10 萬次請求。
+- **中國大陸連線注意**：`*.workers.dev` 在中國大陸常常很慢或被封鎖。根本解法是在 Cloudflare 綁定**自己的網域**（Worker → Settings → Domains & Routes → Custom Domain）；網域需另外購買，尚未處理。
 
 ### 包成 App（之後）
 前端是純靜態檔，可以直接用 Capacitor 之類工具包成 iOS App，`/api` 指向上面任一部署網址即可。屆時定位改用原生 API，開啟高德 App 需要在 `Info.plist` 的 `LSApplicationQueriesSchemes` 加 `iosamap`。
