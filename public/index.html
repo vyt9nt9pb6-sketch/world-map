@@ -57,6 +57,7 @@
     </div>
 
     <!-- 比例尺（左下，面板之上） -->
+    <div class="map-attrib" id="map-attrib" aria-hidden="true"></div>
     <div class="scale" id="scale" aria-hidden="true"><div class="scale-bar" id="scale-bar"></div><span id="scale-label"></span></div>
 
     <!-- 底部面板 -->
@@ -248,8 +249,21 @@
             <span class="muted small">大眾運輸圖層：淡化底圖，疊上全國鐵路線與車站（OpenStreetMap，示意用）。</span>
           </div>
         </div>
-        <!-- 預留：天地圖「全球地表覆蓋」圖層（等 Kwok 決定後再做，目前不顯示） -->
-        <div id="layer-extra" class="hidden" data-reserved="globeland"></div>
+        <!-- 全球圖層：天地圖全球衛星、全球地表覆蓋（ESA WorldCover） -->
+        <div id="layer-extra" class="card layer-opts" data-section="global">
+          <div class="opt-row">
+            <div class="opt-text"><span>天地圖全球衛星</span><small class="muted">影像＋地名（img／cia）。境外約 500 m 解析度；中國境內自動平移對齊高德。</small></div>
+            <button type="button" class="switch" id="opt-global-sat" role="switch" aria-checked="false" aria-label="天地圖全球衛星"><i></i></button>
+          </div>
+          <div class="opt-row">
+            <div class="opt-text"><span>全球地表覆蓋</span><small class="muted">森林、農田、水域、建成區等 10 m 分類（ESA WorldCover 2021）。</small></div>
+            <button type="button" class="switch" id="opt-landcover" role="switch" aria-checked="false" aria-label="全球地表覆蓋"><i></i></button>
+          </div>
+          <div id="landcover-legend" class="lc-legend hidden" aria-label="地表覆蓋圖例">
+            <ul id="lc-legend-list"></ul>
+            <p class="muted small" id="lc-attrib"></p>
+          </div>
+        </div>
       </div>
     </div>
 

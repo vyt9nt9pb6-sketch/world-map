@@ -14,7 +14,7 @@
 - **路線**：主畫面沒有路線入口，只能從地點卡的「路線」進入；公交／火車新增「鐵路優先」。
 - **圖層**：標準／衛星／大眾運輸三張卡；3D 與標準、衛星融合（2D/3D 按鈕＝地圖傾斜）；衛星可選高德或天地圖。
 - **海拔／氣壓**（估計值）：見下節。
-- **天地圖「全球地表覆蓋」**：暫緩（等 Kwok 決定），圖層面板已預留 `#layer-extra[data-reserved="globeland"]`。
+- **全球圖層**（圖層面板下方「全球」區）：① 天地圖全球衛星（img_w＋cia_w 地名，中國境內平移對齊高德、境外不平移）；② 全球地表覆蓋（ESA WorldCover 2021，10 m，11 類，附圖例與來源標示）。研究與取捨見「全球衛星與地表覆蓋」。
 - 地圖引擎從 Leaflet 換成高德 JS API 2.0（單一地圖，傾斜＝3D）；`/3d.html` 只保留為轉址到 `/?view=3d`。
 
 ### 海拔／氣壓提供者介面（給日後原生 App）
@@ -48,9 +48,21 @@ window.WorldMapEnv.registerProvider({
 - 點地圖選地點：高德逆地理編碼＋POI 半徑搜尋（Apple 地圖／Google 地圖的標準做法）。
 - 資料授權：OSM ODbL（鐵路）、Open-Meteo CC BY 4.0（氣象）、高德地圖須保留 Logo 與版權（已移到左上，沒有隱藏）。
 
+### 全球衛星與地表覆蓋（寫程式前的調查）
+**GlobeLand30（國家基礎地理信息中心）——不採用。** 官方入口 globeland30.org 只提供「註冊＋申請＋下載」，天地圖公開的 WMTS 只有矢量／影像／地形／注記／全球境界（`vec/img/ter/cva/cia/cta/ibo`），**沒有地表覆蓋圖層**，也沒有公開的圖磚服務與使用條款；網路上流傳的 WMS（網站內部 IP `218.244.250.80` 的 erdas-apollo）是未公開文件的內部服務，NGCC 網站頁尾還註明「未經許可不得複製、鏡像」。所以**這個子項目照規則停下**，沒有硬抓。若要用 GlobeLand30，需向 NGCC（glc@ngcc.cn）申請書面授權或下載資料自行切片，這要由 Kwok 決定。
+
+**改用 ESA WorldCover 2021 v200（採用）。** CC BY 4.0（免費、不限用途，須標示 `© ESA WorldCover project 2021 / Contains modified Copernicus Sentinel data (2021) processed by ESA WorldCover consortium`）。圖磚：Terrascope（VITO，比利時）的 MapProxy WMTS REST，`https://mapproxy.terrascope.be/mapproxy/wmts/esa-worldcover-map-10m-2021-v2_map/webmercator/{z}/{x}/{y}.png`（Web Mercator、z0–19、回應 `access-control-allow-origin: *`、`max-age` 3 天）。官方色碼取自 WorldCover PUM v2.0 表 3（11 類）。不經我們伺服器代理、不快取、不鏡像。
+- 海外開發機實測可連（HTTP 200，約 1 秒）；**這台機器在海外，無法證明大陸可連**——Terrascope 是歐洲伺服器、沒有 Google 那種封鎖，但可能較慢，需 Kwok 用大陸手機實測。若大陸連不到：替代方案是把 WorldCover 切成自己的圖磚放 R2／國內 CDN（CC BY 允許），或改用 NASA GIBS MODIS 500 m（公有領域，同樣在海外）。
+
+**天地圖全球衛星。** 天地圖 `img_w`＋`cia_w` 本來就是全球覆蓋（Web Mercator，z1–18）；但**境外只有約 500 m 解析度的衛星影像**（高解析度只在中國境內：15 m／2.5 m／城市 0.6 m）。所以境外 z≈9 以上會變模糊——這是資料本身的限制，不是程式。
+
+**座標處理（GCJ-02 只在中國境內）。** 高德圖面在中國是 GCJ-02、境外等於 WGS-84；天地圖與 WorldCover 圖磚是 WGS-84。`createShiftedFlexible`（`public/js/lib/tianditu.js`）對每個高德圖磚用「圖磚中心」做一次 GCJ→WGS 轉換，去抓對應的 WGS 圖磚並平移後畫在 canvas 上；框外（`outOfChina`）轉換為恆等式，所以只取同一張圖磚、不平移（有單元測試：連雲港需平移；巴黎、紐約、雪梨不平移）。已知限制：用的是矩形判斷（香港／澳門／台灣在框內，會被當成中國平移，可能與高德在當地的實際資料有差異）；框邊界的圖磚會有最多一塊圖磚寬的接縫。
+
+**開源參考（只參考做法，沒複製程式碼）：** [htoooth/Leaflet.ChineseTmsProviders](https://github.com/htoooth/Leaflet.ChineseTmsProviders)（MIT；提供天地圖／高德圖磚網址，**不處理偏移**，issue #43「切換底圖，座標偏差」就是這個問題）；[gisarmory/Leaflet.InternetMapCorrection](https://github.com/gisarmory/Leaflet.InternetMapCorrection)（以重算每張圖磚位置來糾偏，與我們的做法同原理；**倉庫沒有明確授權檔案，所以沒有複製任何程式碼**，也有自己的免責聲明）；糾偏演算法為公開演算法（`coords.js` 自行實作）。WorldCover 疊加層的做法（WMTS＋半透明＋圖例）是 ESA 官方文件與 Leaflet/MapLibre 常見用法。
+
 ### 取捨與限制
 - 大眾運輸圖層是「示意」：淡化底圖＋OSM 鐵路線與車站（站點連線，不是真實軌道幾何）；公車／地鐵圖層高德沒有公開圖磚。
-- 天地圖現在以 `AMap.TileLayer.Flexible` 疊加（WebGL 需要未被汙染的 canvas，會先嘗試 CORS，失敗改用一般圖片載入）；開發機在海外被天地圖 WAF 擋（418），**無法在這裡驗證**，需在大陸手機實測。
+- 天地圖與地表覆蓋現在以 `AMap.TileLayer.Flexible` 疊加（WebGL 需要未被汙染的 canvas，會先嘗試 CORS，失敗改用一般圖片載入）；開發機在海外被天地圖 WAF 擋（418），**無法在這裡驗證**，需在大陸手機實測。
 - 真正的 3D（WebGL）在沒有 GPU 的開發機上會退回 2D 點陣，**只能在真機驗證**。
 - 收藏不再以星號畫在地圖上（照 Kwok 的「不要出現在螢幕上」），只在「我的」清單裡；點收藏項目會在地圖上標出。
 

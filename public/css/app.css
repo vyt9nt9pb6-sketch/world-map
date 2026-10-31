@@ -299,3 +299,16 @@ body[data-snap='full'] .ctl-stack, body[data-snap='full'] .scale { opacity: 0; p
 .ctl-stack, .scale { transition: opacity 0.2s; }
 .scale { display: none; }
 .scale.on { display: flex; }
+
+/* 全球圖層（天地圖全球衛星／地表覆蓋）與圖例、來源標示 */
+#layer-extra { margin-top: 12px; }
+.opt-text { display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+.opt-text small { font-size: 12px; line-height: 1.35; }
+.lc-legend { border-top: 0.5px solid var(--sep); padding: 10px 0 12px; }
+.lc-legend ul { list-style: none; margin: 0; padding: 0; display: grid; grid-template-columns: 1fr 1fr; gap: 6px 12px; font-size: 13px; }
+.lc-legend li { display: flex; align-items: center; gap: 8px; min-width: 0; }
+.lc-legend li i { flex: none; width: 14px; height: 14px; border-radius: 4px; box-shadow: inset 0 0 0 0.5px rgba(0, 0, 0, 0.3); }
+.lc-legend p { margin: 10px 0 0; line-height: 1.4; }
+.map-attrib { position: fixed; z-index: 14; left: 14px; bottom: calc(var(--sheet-h, 120px) + 34px + var(--safe-b)); max-width: min(62vw, 420px); font-size: 9px; line-height: 1.3; color: #1c1c1e; text-shadow: 0 0 3px #fff, 0 0 3px #fff, 0 0 3px #fff; pointer-events: none; transition: bottom 0.28s cubic-bezier(0.2, 0.8, 0.2, 1), opacity 0.2s; display: none; }
+.map-attrib.on { display: block; }
+body[data-snap='full'] .map-attrib { opacity: 0; }

@@ -10,7 +10,7 @@ const BASE = {
 // blob: worker，以及 *.amap.com／*.autonavi.com 的圖磚與資料。其餘維持最小授權：
 // 不允許內嵌 script、不允許其他來源、不允許被 iframe。高德 Web 服務請求都走同源 /_AMapService 代理。
 const MAIN_CSP =
-  "default-src 'self'; script-src 'self' https://webapi.amap.com https://*.amap.com 'unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https://*.amap.com https://*.autonavi.com https://*.is.autonavi.com https://*.tianditu.gov.cn; connect-src 'self' data: blob: https://*.amap.com https://*.autonavi.com; worker-src blob: 'self'; font-src 'self' data: https://*.amap.com; frame-ancestors 'none'; base-uri 'self'; object-src 'none'";
+  "default-src 'self'; script-src 'self' https://webapi.amap.com https://*.amap.com 'unsafe-eval'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob: https://*.amap.com https://*.autonavi.com https://*.is.autonavi.com https://*.tianditu.gov.cn https://mapproxy.terrascope.be; connect-src 'self' data: blob: https://*.amap.com https://*.autonavi.com; worker-src blob: 'self'; font-src 'self' data: https://*.amap.com; frame-ancestors 'none'; base-uri 'self'; object-src 'none'";
 
 export function securityHeaders() {
   return { ...BASE, 'content-security-policy': MAIN_CSP };

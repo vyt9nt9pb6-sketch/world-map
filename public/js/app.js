@@ -5,7 +5,8 @@ import { api } from './lib/api.js';
 import { formatDistance, formatDuration, formatYuan } from './lib/format.js';
 import { amapIosUri, amapWebUrl, appleMapsUrl, detectPlatform } from './lib/navlinks.js';
 import { amapMarkerUrl, shareMessage, smsHref, copyText } from './lib/share.js';
-import { createTiandituFlexible } from './lib/tianditu.js';
+import { createTiandituFlexible, TIANDITU_ATTRIBUTION } from './lib/tianditu.js';
+import { createWorldCoverFlexible, WORLDCOVER_LEGEND, legendColor, WORLDCOVER_ATTRIBUTION } from './lib/landcover.js';
 import { createStore, findSamePlace } from './lib/favstore.js';
 import { transitSummary, transitDetail, esc } from './lib/transit-view.js';
 import { loadAMap, createMapView } from './lib/amap-map.js';
@@ -191,6 +192,7 @@ async function initMap() {
     dark: prefersDark(),
     tianditu: state.config.tianditu?.tk ? { tk: state.config.tianditu.tk } : null,
     createTianditu: (A, kind) => createTiandituFlexible(A, { tk: state.config.tianditu.tk, kind }),
+    createLandcover: (A) => createWorldCoverFlexible(A),
   });
   groups = {
     results: view.group(),
@@ -235,7 +237,7 @@ $('map-retry').addEventListener('click', async () => {
 function loadLayerPref() {
   try {
     const v = JSON.parse(localStorage.getItem(LAYER_KEY) || 'null');
-    if (v && ['standard', 'satellite', 'transit'].includes(v.mode)) Object.assign(state.layer, { mode: v.mode, source: v.source === 'tianditu' ? 'tianditu' : 'amap', labels: v.labels !== false });
+    if (v && ['standard', 'satellite', 'transit', 'landcover'].includes(v.mode)) Object.assign(state.layer, { mode: v.mode, source: v.source === 'tianditu' ? 'tianditu' : 'amap', labels: v.labels !== false });
   } catch {
     /* 略過 */
   }
@@ -254,6 +256,16 @@ function applyLayer() {
   $('opt-source').classList.toggle('hidden', L.mode !== 'satellite');
   $('opt-labels').closest('.opt-row').classList.toggle('hidden', L.mode !== 'satellite');
   $('opt-transit-note').classList.toggle('hidden', L.mode !== 'transit');
+  const globalSat = L.mode === 'satellite' && L.source === 'tianditu';
+  $('opt-global-sat').setAttribute('aria-checked', String(globalSat));
+  $('opt-global-sat').disabled = !tdtOk;
+  $('opt-landcover').setAttribute('aria-checked', String(L.mode === 'landcover'));
+  $('landcover-legend').classList.toggle('hidden', L.mode !== 'landcover');
+  // 來源標示（CC BY 4.0 與天地圖都要求標示）
+  const attrib = $('map-attrib');
+  const usingTdt = globalSat && tdtOk;
+  attrib.textContent = L.mode === 'landcover' ? '© ESA WorldCover 2021 · CC BY 4.0' : usingTdt ? TIANDITU_ATTRIBUTION : '';
+  attrib.classList.toggle('on', !!attrib.textContent);
   if (L.mode === 'transit') showRail();
   else hideRail();
   try {
@@ -281,6 +293,18 @@ $('opt-source').addEventListener('click', (e) => {
   state.layer.source = b.dataset.source;
   applyLayer();
 });
+$('opt-global-sat').addEventListener('click', () => {
+  const on = $('opt-global-sat').getAttribute('aria-checked') === 'true';
+  if (on) state.layer.source = 'amap';
+  else Object.assign(state.layer, { mode: 'satellite', source: 'tianditu' });
+  applyLayer();
+});
+$('opt-landcover').addEventListener('click', () => {
+  state.layer.mode = state.layer.mode === 'landcover' ? 'standard' : 'landcover';
+  applyLayer();
+});
+$('lc-legend-list').innerHTML = WORLDCOVER_LEGEND.map((c) => `<li><i style="background:${legendColor(c)}"></i><span>${c.name}</span></li>`).join('');
+$('lc-attrib').textContent = `${WORLDCOVER_ATTRIBUTION}。圖磚由 Terrascope 提供；座標已在中國境內平移對齊高德。`;
 $('opt-labels').addEventListener('click', () => {
   state.layer.labels = !state.layer.labels;
   applyLayer();

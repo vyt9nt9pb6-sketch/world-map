@@ -112,3 +112,46 @@ test('sheet：pickDetent 吸附最近段；快速上滑／下滑至少跨一段'
   assert.equal(pickDetent(770, 2, d), 2); // 已在最高，不越界
   assert.equal(pickDetent(100, -2, d), 0);
 });
+
+import { tileIsShifted, coveringTiles, tileUrl, createShiftedFlexible } from '../public/js/lib/tianditu.js';
+import { worldcoverUrl, WORLDCOVER_LEGEND, WORLDCOVER_ATTRIBUTION, createWorldCoverFlexible } from '../public/js/lib/landcover.js';
+import { LAYER_MODES } from '../public/js/lib/amap-map.js';
+
+test('全球衛星：中國境內平移對齊 GCJ-02，境外（巴黎、紐約、雪梨）不平移', () => {
+  // 連雲港 z14：在中國境內 → 需要平移（約數百公尺 = 數個像素以上）
+  assert.equal(tileIsShifted(13467, 6425, 14), true);
+  // 巴黎 / 紐約 / 雪梨 z12：在中國框外 → 原封不動，只取同一張圖磚
+  for (const [x, y, z] of [[2074, 1409, 12], [1205, 1539, 12], [3768, 2459, 12]]) {
+    assert.equal(tileIsShifted(x, y, z), false);
+    const c = coveringTiles(x, y, z);
+    assert.deepEqual(c, [{ tx: x, ty: y, dx: 0, dy: 0 }]);
+  }
+});
+
+test('天地圖網址：img_w / cia_w，WMTS 參數、tk 被編碼', () => {
+  const u = tileUrl('imagery', 'a b', 8, 129, 88);
+  assert.match(u, /^https:\/\/t\d\.tianditu\.gov\.cn\/img_w\/wmts\?/);
+  assert.match(u, /LAYER=img&STYLE=default&TILEMATRIXSET=w&FORMAT=tiles&TILEMATRIX=8&TILEROW=88&TILECOL=129&tk=a%20b$/);
+  assert.match(tileUrl('labels', 'k', 3, 1, 2), /cia_w\/wmts.*LAYER=cia/);
+});
+
+test('ESA WorldCover：網址、圖例完整（11 類，官方色碼）、標示 CC BY 4.0', () => {
+  assert.equal(worldcoverUrl(5, 17, 10), 'https://mapproxy.terrascope.be/mapproxy/wmts/esa-worldcover-map-10m-2021-v2_map/webmercator/5/17/10.png');
+  assert.equal(WORLDCOVER_LEGEND.length, 11);
+  assert.deepEqual(WORLDCOVER_LEGEND.map((c) => c.code), [10, 20, 30, 40, 50, 60, 70, 80, 90, 95, 100]);
+  assert.deepEqual(WORLDCOVER_LEGEND.find((c) => c.code === 80).rgb, [0, 100, 200]);
+  assert.match(WORLDCOVER_ATTRIBUTION, /ESA WorldCover project 2021/);
+  assert.match(WORLDCOVER_ATTRIBUTION, /CC BY 4\.0/);
+  assert.ok(LAYER_MODES.includes('landcover'));
+});
+
+test('createShiftedFlexible／createWorldCoverFlexible 以 AMap.TileLayer.Flexible 建圖層（含透明度、dataZooms）', () => {
+  let opt;
+  const AMap = { TileLayer: { Flexible: class { constructor(o) { opt = o; } } } };
+  createWorldCoverFlexible(AMap);
+  assert.equal(opt.opacity, 0.68);
+  assert.deepEqual(opt.dataZooms, [3, 19]);
+  assert.equal(typeof opt.createTile, 'function');
+  createShiftedFlexible(AMap, { urlFor: () => 'x' });
+  assert.equal(opt.opacity, 1);
+});

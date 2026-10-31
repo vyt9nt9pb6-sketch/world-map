@@ -82,23 +82,31 @@ export async function renderTile(x, y, z, load, doc = document) {
   return oks.some(Boolean) ? canvas : null;
 }
 
+/** 這張 GCJ 圖磚（以圖磚中心判斷）是否需要平移？境外（含框外）回傳 false，圖磚原封不動 */
+export function tileIsShifted(x, y, z) {
+  const { sx, sy } = sourceRect(x, y, z);
+  return Math.abs(sx - x * TILE) > 0.5 || Math.abs(sy - y * TILE) > 0.5;
+}
+
 /**
- * 高德 JS API 2.0 的 AMap.TileLayer.Flexible 圖層（官方文件：3D 模式下自訂圖磚用 canvas 才不受 CORS 限制）。
- * kind: 'imagery' | 'labels'
+ * 通用：把「WGS-84 的 Web Mercator 圖磚來源」變成高德 JS API 2.0 的 AMap.TileLayer.Flexible 圖層
+ * （官方文件：3D 模式下自訂圖磚用 canvas 才不受 CORS 限制）。
+ * 中國境內平移對齊高德 GCJ-02；境外高德座標＝WGS-84，不平移。
+ * urlFor(z,x,y) → 圖磚網址。天地圖影像／注記與 ESA WorldCover 共用。
  */
-export function createTiandituFlexible(AMap, { tk, kind = 'imagery', zIndex }) {
+export function createShiftedFlexible(AMap, { urlFor, zIndex = 3, opacity = 1, dataZooms = [3, 18], zooms = [3, 20] }) {
   const mem = new Map(); // 僅瀏覽器記憶體內的小型暫存：相鄰 GCJ 圖磚重複使用同一批 WGS 圖磚
   const load = (z, x, y) => {
     const key = `${z}/${x}/${y}`;
     if (mem.has(key)) return mem.get(key);
-    // 先用 crossOrigin（3D/WebGL 需要未污染的 canvas）；若天地圖沒有回 CORS 標頭而失敗，退回一般載入（2D 模式仍可顯示）
+    // 先用 crossOrigin（3D/WebGL 需要未污染的 canvas）；若來源沒有回 CORS 標頭而失敗，退回一般載入（2D 模式仍可顯示）
     const attempt = (cors) =>
       new Promise((resolve) => {
         const img = new Image();
         if (cors) img.crossOrigin = 'anonymous';
         img.onload = () => resolve(img);
         img.onerror = () => resolve(null);
-        img.src = tileUrl(kind, tk, z, x, y);
+        img.src = urlFor(z, x, y);
       });
     const p = attempt(true).then((img) => img || attempt(false));
     mem.set(key, p);
@@ -107,11 +115,21 @@ export function createTiandituFlexible(AMap, { tk, kind = 'imagery', zIndex }) {
   };
   return new AMap.TileLayer.Flexible({
     cacheSize: 80,
-    zIndex: zIndex ?? (kind === 'imagery' ? 3 : 4),
-    dataZooms: [3, 18],
-    zooms: [3, 20],
+    zIndex,
+    opacity,
+    dataZooms,
+    zooms,
     createTile(x, y, z, success, fail) {
       renderTile(x, y, z, load).then((c) => (c ? success(c) : fail()), () => fail());
     },
+  });
+}
+
+/** 天地圖影像（img_w）或影像注記（cia_w）。kind: 'imagery' | 'labels'。全球可用；境外影像約 500 m 解析度。 */
+export function createTiandituFlexible(AMap, { tk, kind = 'imagery', zIndex }) {
+  return createShiftedFlexible(AMap, {
+    urlFor: (z, x, y) => tileUrl(kind, tk, z, x, y),
+    zIndex: zIndex ?? (kind === 'imagery' ? 3 : 4),
+    dataZooms: [3, 18],
   });
 }

@@ -79,6 +79,7 @@ test('安全標頭：單一 CSP 只放行高德 JS API／圖磚，不開放內�
   assert.match(csp, /script-src 'self' https:\/\/webapi\.amap\.com/);
   assert.ok(!/script-src[^;]*'unsafe-inline'/.test(csp));
   assert.match(csp, /img-src[^;]*tianditu\.gov\.cn/);
+  assert.match(csp, /img-src[^;]*mapproxy\.terrascope\.be/);
   assert.match(csp, /connect-src 'self' data: blob: https:\/\/\*\.amap\.com/);
   assert.ok(!/google|mapbox/i.test(csp));
   assert.match(csp, /frame-ancestors 'none'/);

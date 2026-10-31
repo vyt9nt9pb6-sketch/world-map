@@ -30,7 +30,7 @@ export function loadAMap({ key, serviceHost }, doc = document, win = window) {
 const ll = (p) => [p.lng, p.lat];
 const fromLngLat = (x) => ({ lng: x.getLng(), lat: x.getLat() });
 
-export const LAYER_MODES = ['standard', 'satellite', 'tianditu', 'transit'];
+export const LAYER_MODES = ['standard', 'satellite', 'tianditu', 'transit', 'landcover'];
 
 /**
  * @param AMap  window.AMap
@@ -120,6 +120,7 @@ export function createMapView(AMap, el, opts = {}) {
         if (labels) set.push(make('roadnet', () => new AMap.TileLayer.RoadNet({ zIndex: 3 })));
       }
     }
+    if (mode === 'landcover' && opts.createLandcover) set.push(make('worldcover', () => opts.createLandcover(AMap)));
     return set;
   }
   function setLayerMode(mode, extra = {}) {
@@ -131,7 +132,7 @@ export function createMapView(AMap, el, opts = {}) {
     state.overlay = [...want];
     const sat = mode === 'satellite' || mode === 'tianditu';
     // 衛星時底圖向量圖層被圖磚蓋住；標準用預設樣式，大眾運輸用低彩度樣式讓鐵路線更醒目
-    map.setMapStyle(state.dark ? 'amap://styles/dark' : mode === 'transit' ? 'amap://styles/light' : 'amap://styles/normal');
+    map.setMapStyle(state.dark ? 'amap://styles/dark' : mode === 'transit' || mode === 'landcover' ? 'amap://styles/light' : 'amap://styles/normal');
     el.dataset.layer = sat ? 'satellite' : mode;
   }
   function setDark(dark) {
