@@ -47,6 +47,7 @@ test('_AMapService：附加伺服器端 jscode、移除使用者帶的 jscode、
   assert.equal(u.origin, 'https://restapi.amap.com');
   assert.equal(u.pathname, '/v3/place/text');
   assert.deepEqual(u.searchParams.getAll('jscode'), ['SECURITYCODE123']);
+  assert.equal(f.calls[0].init.headers.referer, 'http://localhost/');
   assert.equal(u.searchParams.get('key'), 'JSKEY123');
   assert.ok(!u.href.includes(FAKE_KEY));
   assert.ok(!(await res.text()).includes('SECURITYCODE123'));

@@ -49,7 +49,7 @@ export async function amapServiceProxy(ctx) {
   up.searchParams.set('jscode', code);
   let res;
   try {
-    res = await (fetchImpl ?? fetch)(up.toString(), { headers: { accept: 'application/json' }, signal: AbortSignal.timeout(10000) });
+    res = await (fetchImpl ?? fetch)(up.toString(), { headers: { accept: '*/*', referer: url.origin + '/' }, signal: AbortSignal.timeout(10000) });
   } catch {
     throw new HttpError(504, 'upstream_timeout', '地圖服務連線逾時');
   }
