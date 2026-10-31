@@ -281,3 +281,74 @@ export function mapTransitResponse(json) {
     }),
   };
 }
+
+/**
+ * 逆地理編碼（v3 regeo, extensions=all）→ 「點到的地點」。
+ * 優先順序：半徑內最近的 POI → 所在 AOI（園區／社區／景區）→ 門牌／街道地址。
+ */
+export function mapRegeoResponse(json, point, radius = 50) {
+  const r = json?.regeocode || {};
+  const ac = r.addressComponent || {};
+  const region = {
+    province: str(ac.province),
+    city: str(ac.city) || str(ac.province),
+    district: str(ac.district),
+    adcode: str(ac.adcode),
+    citycode: str(ac.citycode),
+  };
+  const regionText = [region.province, region.city !== region.province ? region.city : '', region.district].filter(Boolean).join(' ');
+  const pois = (Array.isArray(r.pois) ? r.pois : [])
+    .map((p) => ({ p, d: num(p.distance), loc: parseLocation(p.location) }))
+    .filter((x) => x.loc && x.d != null && x.d <= radius && str(x.p.name))
+    .sort((a, b) => a.d - b.d);
+  if (pois.length) {
+    const { p, d, loc } = pois[0];
+    return {
+      kind: 'poi',
+      id: str(p.id) || null,
+      name: str(p.name),
+      address: str(p.address) || str(r.formatted_address) || regionText,
+      type: str(p.type),
+      tel: str(p.tel) || null,
+      distance: d,
+      lng: loc.lng,
+      lat: loc.lat,
+      tapped: point,
+      ...region,
+    };
+  }
+  const aoi = (Array.isArray(r.aois) ? r.aois : []).find((a) => str(a.name));
+  if (aoi) {
+    const loc = parseLocation(aoi.location) || point;
+    return {
+      kind: 'aoi',
+      id: str(aoi.id) || null,
+      name: str(aoi.name),
+      address: str(r.formatted_address) || regionText,
+      type: str(aoi.type),
+      tel: null,
+      distance: null,
+      lng: loc.lng,
+      lat: loc.lat,
+      tapped: point,
+      ...region,
+    };
+  }
+  const sn = ac.streetNumber || {};
+  const street = [str(sn.street), str(sn.number)].filter(Boolean).join('');
+  const road = (Array.isArray(r.roads) ? r.roads : []).find((x) => str(x.name) && (num(x.distance) ?? 1e9) <= Math.max(radius, 30));
+  const name = street || str(road?.name) || str(ac.township) || regionText || '選取的位置';
+  return {
+    kind: 'address',
+    id: null,
+    name,
+    address: str(r.formatted_address) || regionText,
+    type: '',
+    tel: null,
+    distance: null,
+    lng: point.lng,
+    lat: point.lat,
+    tapped: point,
+    ...region,
+  };
+}

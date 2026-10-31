@@ -11,6 +11,8 @@ import {
   validateGeocode,
   validateRoute,
   validateNearby,
+  validateRegeo,
+  validateEnvironment,
   ROUTE_STRATEGIES,
   TRANSIT_STRATEGIES,
   NEARBY_TYPES,
@@ -22,6 +24,7 @@ import {
   mapRouteResponse,
   mapPathRouteResponse,
   mapTransitResponse,
+  mapRegeoResponse,
 } from './mapping.js';
 import { HttpError, json, errorResponse } from './http.js';
 import { createRailMatcher } from './rail.js';
@@ -202,21 +205,18 @@ export async function handleRoute(params, env, fetchImpl) {
       v.city1 ?? cityOf(v.origin, env, fetchImpl),
       v.city2 ?? cityOf(v.destination, env, fetchImpl),
     ]);
-    const body = await callAmap(
-      '/v5/direction/transit/integrated',
-      {
-        origin: v.origin,
-        destination: v.destination,
-        city1,
-        city2,
-        strategy: TRANSIT_STRATEGIES[v.strategy],
-        AlternativeRoute: 4,
-        extensions: 'all',
-        show_fields: 'cost,polyline',
-      },
-      env,
-      fetchImpl,
-    );
+    const query = (strategy) => ({
+      origin: v.origin,
+      destination: v.destination,
+      city1,
+      city2,
+      strategy,
+      AlternativeRoute: 4,
+      extensions: 'all',
+      show_fields: 'cost,polyline',
+    });
+    if (v.strategy === 'rail_first') return railFirstTransit(query, env, fetchImpl);
+    const body = await callAmap('/v5/direction/transit/integrated', query(TRANSIT_STRATEGIES[v.strategy]), env, fetchImpl);
     const out = mapTransitResponse(body);
     out.routes.forEach((r) => attachRailLines(r));
     return out;
@@ -229,6 +229,112 @@ export async function handleRoute(params, env, fetchImpl) {
     fetchImpl,
   );
   return mapPathRouteResponse(body, v.mode);
+}
+
+// ───────────── 鐵路優先 ─────────────
+// 高德 v5 公交策略 0–8 沒有「鐵路／火車優先」（7 只是「地鐵優先」）。
+// 作法：用「推薦／時間短／最少換乘」三種策略各查一次，合併去重，
+// 含火車段的方案排前面（火車佔行程距離比例高者優先，再比總時間）。找不到含火車的方案時照實回報。
+const RAIL_FIRST_STRATEGIES = ['0', '8', '2'];
+
+export const trainDistance = (r) => r.segments.filter((s) => s.type === 'train').reduce((n, s) => n + (s.distance || 0), 0);
+
+function routeSignature(r) {
+  return r.segments.map((s) => (s.type === 'walk' ? 'w' : `${s.type}:${s.trip || s.name}:${s.from?.name || ''}>${s.to?.name || ''}`)).join('|');
+}
+
+export function rankRailFirst(routes) {
+  const seen = new Set();
+  const unique = [];
+  for (const r of routes) {
+    const sig = routeSignature(r);
+    if (seen.has(sig)) continue;
+    seen.add(sig);
+    unique.push(r);
+  }
+  const share = (r) => (r.distance ? trainDistance(r) / r.distance : 0);
+  unique.sort((a, b) => {
+    const ta = trainDistance(a) > 0;
+    const tb = trainDistance(b) > 0;
+    if (ta !== tb) return ta ? -1 : 1;
+    if (ta && Math.abs(share(a) - share(b)) > 0.05) return share(b) - share(a);
+    return (a.duration ?? 1e9) - (b.duration ?? 1e9);
+  });
+  return unique.map((r, i) => ({ ...r, index: i }));
+}
+
+async function railFirstTransit(query, env, fetchImpl) {
+  const settled = await Promise.allSettled(
+    RAIL_FIRST_STRATEGIES.map((st) => callAmap('/v5/direction/transit/integrated', query(st), env, fetchImpl)),
+  );
+  const ok = settled.filter((x) => x.status === 'fulfilled');
+  if (!ok.length) throw settled[0].reason;
+  const all = ok.flatMap((x) => mapTransitResponse(x.value).routes);
+  const ranked = rankRailFirst(all).slice(0, 8);
+  ranked.forEach((r) => attachRailLines(r));
+  return { mode: 'transit', railFirst: true, hasTrain: ranked.some((r) => trainDistance(r) > 0), routes: ranked };
+}
+
+// ───────────── 點選地圖：逆地理編碼＋附近 POI ─────────────
+export async function handleRegeo(params, env, fetchImpl) {
+  const v = validateRegeo(params);
+  const body = await callAmap('/v3/geocode/regeo', { location: v.location, radius: Math.max(v.radius, 50), extensions: 'all', roadlevel: 0 }, env, fetchImpl);
+  const [lng, lat] = v.location.split(',').map(Number);
+  return mapRegeoResponse(body, { lng, lat }, v.radius);
+}
+
+// ───────────── 海拔／氣壓（估計值）─────────────
+// 來源：Open-Meteo 免費 API（非商用、CC BY 4.0；氣壓為氣象模型的地面氣壓，海拔為 Copernicus GLO-90 90 m DEM）。
+// 由 Worker／伺服器代為呼叫：瀏覽器不直接連 api.open-meteo.com（中國大陸可能連不到，也讓 CSP 維持 connect-src 'self'）。
+const OPEN_METEO = 'https://api.open-meteo.com/v1/forecast';
+
+export async function handleEnvironment(ctx) {
+  const v = validateEnvironment(ctx.params);
+  const url = new URL(OPEN_METEO);
+  url.searchParams.set('latitude', String(v.lat));
+  url.searchParams.set('longitude', String(v.lng));
+  url.searchParams.set('current', 'surface_pressure,pressure_msl,temperature_2m');
+  url.searchParams.set('timezone', 'GMT');
+  let res;
+  try {
+    res = await (ctx.fetchImpl ?? fetch)(url.toString(), { headers: { accept: 'application/json' }, signal: AbortSignal.timeout(UPSTREAM_TIMEOUT_MS) });
+  } catch {
+    throw new UpstreamError(504, 'upstream_timeout', '氣象資料連線逾時，請稍後再試');
+  }
+  if (!res.ok) throw new UpstreamError(res.status === 429 ? 429 : 502, 'upstream', '氣象資料暫時無法使用，請稍後再試');
+  let b;
+  try {
+    b = await res.json();
+  } catch {
+    throw new UpstreamError(502, 'upstream', '氣象資料回應格式錯誤');
+  }
+  const cur = b?.current || {};
+  const n = (x) => (typeof x === 'number' && Number.isFinite(x) ? x : null);
+  const out = {
+    estimate: true,
+    elevation: n(b?.elevation) == null ? null : { value: b.elevation, unit: 'm', source: 'api', label: '地形高程（Copernicus GLO-90，約 90 m 解析度）' },
+    pressure:
+      n(cur.surface_pressure) == null
+        ? null
+        : {
+            surface: cur.surface_pressure,
+            seaLevel: n(cur.pressure_msl),
+            unit: 'hPa',
+            time: typeof cur.time === 'string' ? `${cur.time}:00Z` : null,
+            source: 'api',
+            label: '氣象模型估計的地面氣壓（Open-Meteo）',
+          },
+    temperature: n(cur.temperature_2m),
+    attribution: 'Weather data by Open-Meteo.com (CC BY 4.0)',
+  };
+  return json(out, 200, { 'cache-control': 'public, max-age=300' });
+}
+
+// ───────────── 大眾運輸圖層：鐵路線資料（OSM, ODbL）─────────────
+export async function handleRailLines() {
+  return json({ attribution: railData.attribution, lines: railData.lines.map((l) => ({ id: l.id, ref: l.ref, name: l.name, from: l.from, to: l.to, stations: l.stations })) }, 200, {
+    'cache-control': 'public, max-age=86400',
+  });
 }
 
 export async function handleNearby(params, env, fetchImpl) {
@@ -253,6 +359,9 @@ const ROUTES = {
   '/api/geocode': { GET: data(handleGeocode) },
   '/api/route': { GET: data(handleRoute) },
   '/api/nearby': { GET: data(handleNearby) },
+  '/api/regeo': { GET: data(handleRegeo) },
+  '/api/environment': { GET: raw(handleEnvironment) },
+  '/api/rail-lines': { GET: raw(handleRailLines) },
   '/api/config': { GET: raw(getConfig) },
   '/api/auth/request-code': { POST: raw(requestCode, true) },
   '/api/auth/verify': { POST: raw(verifyCode, true) },

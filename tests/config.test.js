@@ -74,11 +74,12 @@ test('_AMapService：JSONP（callback）回應標成 JavaScript；callback 格�
   assert.equal(f.calls.length, 1);
 });
 
-test('安全標頭：主頁嚴格 CSP；只有 3d.html 放寬並允許高德 JS API', () => {
-  const main = securityHeaders('/')['content-security-policy'];
-  assert.match(main, /script-src 'self';/);
-  assert.ok(!main.includes('unsafe-eval'));
-  assert.match(main, /img-src[^;]*tianditu\.gov\.cn/);
-  const d3 = securityHeaders('/3d.html')['content-security-policy'];
-  assert.match(d3, /webapi\.amap\.com/);
+test('安全標頭：單一 CSP 只放行高德 JS API／圖磚，不開放內嵌 script 與其他來源', () => {
+  const csp = securityHeaders('/')['content-security-policy'];
+  assert.match(csp, /script-src 'self' https:\/\/webapi\.amap\.com/);
+  assert.ok(!/script-src[^;]*'unsafe-inline'/.test(csp));
+  assert.match(csp, /img-src[^;]*tianditu\.gov\.cn/);
+  assert.match(csp, /connect-src 'self' data: blob: https:\/\/\*\.amap\.com/);
+  assert.ok(!/google|mapbox/i.test(csp));
+  assert.match(csp, /frame-ancestors 'none'/);
 });

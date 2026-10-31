@@ -125,6 +125,9 @@ export const TRANSIT_STRATEGIES = {
   comfortable: '5', // 不乘地鐵
   subway_first: '7', // 地鐵優先
   fastest: '8', // 時間短
+  // 高德 v5 沒有「鐵路／火車優先」的 strategy（只有 7＝地鐵優先）。
+  // rail_first 是本服務自己的排序：同時查多種策略、合併後把含火車段的方案排前面（見 handlers.js）。
+  rail_first: '0',
 };
 
 const CITY_CODE = /^[0-9]{3,6}$/;
@@ -174,4 +177,25 @@ export function validateNearby(params) {
     radius: int(params, 'radius', { min: 100, max: 10000, def: 3000 }),
     limit: int(params, 'limit', { min: 1, max: 25, def: 25 }),
   };
+}
+
+/** 點選地圖：逆地理編碼＋附近 POI（半徑單位：公尺） */
+export function validateRegeo(params) {
+  return {
+    location: lngLat(params, 'location', { required: true }),
+    radius: int(params, 'radius', { min: 10, max: 300, def: 50 }),
+  };
+}
+
+const COORD = /^-?\d{1,3}(\.\d{1,8})?$/;
+/** 海拔／氣壓：WGS-84 座標（瀏覽器定位的原始座標）。四捨五入到 0.01° 以提高快取命中，也不精確洩漏位置。 */
+export function validateEnvironment(params) {
+  const read = (f, lim) => {
+    const raw = params.get(f);
+    if (raw == null || !COORD.test(raw.trim())) throw new ValidationError(f, `${f} 必須是數字`);
+    const n = Number(raw);
+    if (!(Math.abs(n) <= lim)) throw new ValidationError(f, `${f} 超出範圍`);
+    return Math.round(n * 100) / 100;
+  };
+  return { lat: read('lat', 90), lng: read('lng', 180) };
 }
