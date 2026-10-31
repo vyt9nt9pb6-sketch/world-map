@@ -232,15 +232,24 @@ export function createMapView(AMap, el, opts = {}) {
   }
   /** 讓 p 出現在「可見區域」（扣掉頂部與底部面板）的正中央 */
   function flyTo(p, zoom, pad = {}, animate = true) {
-    const z = zoom ?? map.getZoom();
-    map.setZoomAndCenter(z, ll(p), animate);
-    const { top = 0, bottom = 0 } = pad;
-    if (top || bottom) {
-      const h = el.clientHeight;
-      const w = el.clientWidth;
-      const vy = (top + (h - bottom)) / 2;
-      map.setCenter(map.containerToLngLat(new AMap.Pixel(w / 2, h - vy)), animate);
-    }
+    let z = zoom ?? map.getZoom();
+    if (map.getView?.()?.type === '2D') z = Math.floor(z); // 沒有 WebGL 時只支援整數層級
+    const { top = 0, bottom = 0, left = 0, right = 0 } = pad;
+    // 用墨卡托公式直接算出「讓 p 出現在可見區域正中央」所需的地圖中心（不依賴動畫中途的地圖狀態）
+    const scale = 256 * 2 ** z; // 世界的像素寬度
+    const h = el.clientHeight;
+    const w = el.clientWidth;
+    const dy = h / 2 - (top + (h - bottom)) / 2; // 可見區中心比地圖中心高出多少 px
+    const dx = w / 2 - (left + (w - right)) / 2;
+    const px = ((p.lng + 180) / 360) * scale;
+    const sinLat = Math.sin((Math.max(-85, Math.min(85, p.lat)) * Math.PI) / 180);
+    const py = (0.5 - Math.log((1 + sinLat) / (1 - sinLat)) / (4 * Math.PI)) * scale;
+    const cx = px + dx;
+    const cy = py + dy;
+    const lng = (cx / scale) * 360 - 180;
+    const n = Math.PI - (2 * Math.PI * cy) / scale;
+    const lat = (180 / Math.PI) * Math.atan(0.5 * (Math.exp(n) - Math.exp(-n)));
+    map.setZoomAndCenter(z, [lng, lat], animate);
   }
   /** 點若被面板蓋住或在畫面外，才移動地圖 */
   function ensureVisible(p, pad = {}) {
