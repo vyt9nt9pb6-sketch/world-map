@@ -1,9 +1,58 @@
-# World Map v2
+# World Map v3
 
 **線上版（固定網址）：https://world-map.kwok-worldmap.workers.dev**
 
 給長途自駕用的網頁地圖：高德高清底圖、搜尋、駕車路線（含過路費）、一鍵交給高德地圖／Apple 地圖導航。
 手機（iPhone Safari）優先，桌機也能用；之後可以包成 App。
+
+## v3（Apple 地圖風格改版）
+
+### 變更摘要
+- **介面**：底部面板（搜尋列在最下面，可拖到 peek／半高／全高）、右上浮動圓形按鈕（圖層、2D/3D、定位、指北針）、左下比例尺、人像按鈕（我的：帳號＋收藏）、支援深色模式。
+- **搜尋**：搜尋記錄與「搜尋附近」（廁所／加油站／充電站）都在搜尋面板裡；螢幕最上面不再有 chips。
+- **點地圖選地點**（類似 Apple 地圖）：點一下 → `/api/regeo`（伺服器端呼叫高德逆地理編碼）→ 顯示最近的 POI／建築名稱、地址、電話；長按同樣可選點。
+- **路線**：主畫面沒有路線入口，只能從地點卡的「路線」進入；公交／火車新增「鐵路優先」。
+- **圖層**：標準／衛星／大眾運輸三張卡；3D 與標準、衛星融合（2D/3D 按鈕＝地圖傾斜）；衛星可選高德或天地圖。
+- **海拔／氣壓**（估計值）：見下節。
+- **天地圖「全球地表覆蓋」**：暫緩（等 Kwok 決定），圖層面板已預留 `#layer-extra[data-reserved="globeland"]`。
+- 地圖引擎從 Leaflet 換成高德 JS API 2.0（單一地圖，傾斜＝3D）；`/3d.html` 只保留為轉址到 `/?view=3d`。
+
+### 海拔／氣壓提供者介面（給日後原生 App）
+`public/js/lib/env-provider.js`。每個提供者長這樣：
+
+```js
+{ source: 'sensor' | 'gps' | 'api',
+  getAltitude(ctx) -> { value /*公尺*/, accuracy?, label } | null,
+  getPressure(ctx) -> { value /*hPa*/, seaLevel?, label, time? } | null }
+```
+- 優先順序 `sensor > gps > api`，前一個回傳 null 或丟錯就換下一個；統一結果 `{kind, value, unit, source, estimate, label, ...}`，只有 `source:'sensor'` 的 `estimate` 是 false，其他一律在畫面上標「估計」。
+- 目前內建：`gps`（`position.coords.altitude`，手機有回報才有；很多 iPhone 網頁拿到的是 null）、`api`（`/api/environment`，Open-Meteo：Copernicus 90 m 地形高程＋氣象模型地面氣壓）。
+- **網頁讀不到 iPhone 的氣壓計。** 原生 App（Swift）用 `CMAltimeter`（`relativeAltitude` + `pressure`，單位 kPa，需換成 hPa ×10）時，在 WebView 注入：
+
+```js
+window.WorldMapEnv.registerProvider({
+  source: 'sensor',
+  getPressure: async () => ({ value: nativePressureHpa, label: 'iPhone 氣壓計' }),
+  getAltitude: async () => ({ value: nativeRelativeOrAbsoluteAltitude, label: 'iPhone 氣壓計（相對高度需自行校正）' }),
+});
+```
+  不用改任何前端 UI；原生端也可直接 import `env-provider.js` 的 `createEnvService`。注意 `CMAltimeter` 只給「相對高度變化」，絕對海拔仍需 GPS 或地形資料校正。
+- Open-Meteo：免費版僅限非商用，要標示 CC BY 4.0 並有頻率限制；若商用需買授權。
+
+### 鐵路優先
+高德 v5 公交策略 0–8 沒有「鐵路／火車優先」（7 只是地鐵優先）。做法：伺服器用「推薦／最快／少換乘」三種策略各查一次、去重，含火車段的方案排前面（火車佔距離比例高者優先）。代價：每次搜尋用掉 3 次高德配額；找不到含火車的方案時畫面會照實說明，不會假裝有。
+
+### 開源參考與授權（寫程式前的調查）
+- 底部面板（bottom sheet）：參考 MIT 授權的現成元件的設計（停靠點、慣性投射、拖曳區），但**沒有複製任何程式碼，也沒有引入第三方 UI 依賴**；`sheet.js` 為自行撰寫（含單元測試）。
+- 比例尺：Web Mercator 公式 `156543.03392·cos(lat)/2^z`，取 1／2／5×10ⁿ 為刻度。
+- 點地圖選地點：高德逆地理編碼＋POI 半徑搜尋（Apple 地圖／Google 地圖的標準做法）。
+- 資料授權：OSM ODbL（鐵路）、Open-Meteo CC BY 4.0（氣象）、高德地圖須保留 Logo 與版權（已移到左上，沒有隱藏）。
+
+### 取捨與限制
+- 大眾運輸圖層是「示意」：淡化底圖＋OSM 鐵路線與車站（站點連線，不是真實軌道幾何）；公車／地鐵圖層高德沒有公開圖磚。
+- 天地圖現在以 `AMap.TileLayer.Flexible` 疊加（WebGL 需要未被汙染的 canvas，會先嘗試 CORS，失敗改用一般圖片載入）；開發機在海外被天地圖 WAF 擋（418），**無法在這裡驗證**，需在大陸手機實測。
+- 真正的 3D（WebGL）在沒有 GPU 的開發機上會退回 2D 點陣，**只能在真機驗證**。
+- 收藏不再以星號畫在地圖上（照 Kwok 的「不要出現在螢幕上」），只在「我的」清單裡；點收藏項目會在地圖上標出。
 
 ## 功能
 
@@ -62,7 +111,7 @@ CF_KV_NAMESPACE_ID=<KV id> node scripts/deploy-cloudflare.mjs    # 產生 .run/c
 Vercel 部署不支援登入與收藏同步（沒有 KV 綁定），其他功能可用。
 
 ### 資料與授權
-- **Leaflet.markercluster 1.5.3**（MIT）放在 `public/vendor/markercluster/`。
+- v3 起不再內含 Leaflet／markercluster；地圖引擎改為高德 JS API 2.0（執行時由 webapi.amap.com 載入，非本專案內含）。
 - **鐵路線資料集** `data/rail-lines.json` 來自 **OpenStreetMap**（© OpenStreetMap contributors，**ODbL 1.0**），由 `scripts/build-rail-lines.mjs` 透過 Overpass API 產生；App 內地圖與火車詳情會顯示著作權標示與授權連結。這是衍生資料庫，若再散布須以 ODbL 釋出。
 - **OpenRailwayMap 為 GPL-3.0，本專案沒有複製其程式碼**；只使用 OSM 原始資料與自己撰寫的比對程式（`core/rail.js`）。
 - 站序修正（`scripts/lib/rail-order.mjs`）：OSM 站點成員順序有時不沿線，以重新插入＋2-opt 修正，仍可能有少數誤差。
@@ -74,10 +123,13 @@ Vercel 部署不支援登入與收藏同步（沒有 KV 綁定），其他功能
 public/                 前端（純靜態檔，無需編譯）
   index.html  css/app.css  js/app.js
   js/lib/coords.js      WGS-84 ⇄ GCJ-02 轉換
-  js/lib/layers.js      高德圖磚網址與高清策略
+  js/lib/amap-map.js    高德 JS 2.0 地圖封裝（圖層、疊加物、長按、2D/3D）
+  js/lib/sheet.js       底部面板（可拖曳停靠點）
+  js/lib/history.js     搜尋記錄
+  js/lib/scale.js       比例尺
+  js/lib/env-provider.js 海拔／氣壓提供者介面
   js/lib/navlinks.js    高德／Apple 導航連結
   js/lib/api.js         呼叫自家 /api（前端完全沒有金鑰）
-  vendor/leaflet/       Leaflet 1.9.4（地圖引擎）
 core/                   後端邏輯（平台無關：標準 Fetch Request → Response）
   handlers.js           /api/search、/api/geocode、/api/route
   validate.js           參數白名單與驗證
@@ -103,7 +155,7 @@ start-tunnel.sh         重新啟動本機伺服器＋Cloudflare 臨時通道
 - `npm run check:secrets` 會比對前端檔案、git 追蹤檔案、git 歷史（可加線上網址）裡是否出現金鑰的值，但不會印出金鑰。
 
 ### 座標系
-- 全程使用 **GCJ-02**（高德座標）：圖磚、搜尋結果、路線都是 GCJ-02，直接當作 Leaflet 的經緯度使用，所以線和地圖完全對齊。
+- 全程使用 **GCJ-02**（高德座標）：圖磚、搜尋結果、路線都是 GCJ-02，直接交給高德 JS API 使用，所以線和地圖完全對齊。
 - 只有瀏覽器定位是 WGS-84，用標準轉換公式（Krasovsky 橢球）轉成 GCJ-02；中國範圍外不轉換。
 - **交給 Apple 地圖時傳 GCJ-02**：Apple 地圖在中國大陸使用高德資料、以 GCJ-02 顯示與解讀座標（中國大陸的 Apple 地圖分享連結帶的就是 GCJ-02 座標）。這一點尚未在實機上驗證，所以起點是「我的位置」時不傳起點座標，讓 Apple 地圖自己用 GPS 定位，降低風險。
 - 交給高德時明確標示 `dev=0`（iOS URI，表示座標已是 GCJ-02）與 `coordinate=gaode`（網頁版）。

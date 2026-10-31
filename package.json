@@ -12,7 +12,6 @@
     "dev": "node --watch server/server.mjs",
     "test": "node --test \"tests/**/*.test.js\"",
     "check:secrets": "node scripts/check-secrets.mjs",
-    "check:tiles": "node scripts/check-tiles.mjs",
     "check:api": "node scripts/api-smoke.mjs",
     "screenshots": "node scripts/screenshots.mjs"
   },

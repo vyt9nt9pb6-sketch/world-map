@@ -55,7 +55,7 @@ if (existsSync(join(root, '.git'))) {
 
 // 4) 選填：線上網址抓回來的前端檔案
 for (const base of process.argv.slice(2)) {
-  for (const p of ['/', '/index.html', '/js/app.js', '/js/lib/api.js', '/js/lib/layers.js', '/js/lib/navlinks.js', '/js/lib/coords.js', '/js/lib/format.js', '/css/app.css', '/manifest.webmanifest']) {
+  for (const p of ['/', '/index.html', '/js/app.js', '/js/lib/api.js', '/js/lib/amap-map.js', '/js/lib/sheet.js', '/js/lib/navlinks.js', '/js/lib/coords.js', '/js/lib/format.js', '/css/app.css', '/manifest.webmanifest']) {
     const res = await fetch(base.replace(/\/$/, '') + p);
     scan('url:' + p, Buffer.from(await res.arrayBuffer()));
     // 回應標頭也查

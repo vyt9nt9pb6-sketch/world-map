@@ -64,37 +64,54 @@ export function tileUrl(layer, tk, z, x, y) {
 
 export const TIANDITU_ATTRIBUTION = '© 天地圖 · 國家地理信息公共服務平台';
 
-/** 建立 Leaflet GridLayer（L 由呼叫端傳入）。kind: 'imagery' | 'labels' */
-export function createTiandituLayer(L, { tk, kind = 'imagery', maxNativeZoom = 18 }) {
-  const mem = new Map(); // 僅瀏覽器記憶體內的小型暫存：同一批 WGS 圖磚供相鄰 GCJ 圖磚重複使用
+/**
+ * 產生一個 GCJ 圖磚 (x,y,z) 的 canvas（把需要的 WGS 圖磚平移後畫上去）。
+ * load(z,x,y) → Promise<HTMLImageElement|null>；回傳 Promise<canvas|null>（全部載入失敗 → null）。
+ */
+export async function renderTile(x, y, z, load, doc = document) {
+  const canvas = doc.createElement('canvas');
+  canvas.width = canvas.height = TILE;
+  const ctx = canvas.getContext('2d');
+  const oks = await Promise.all(
+    coveringTiles(x, y, z).map(async (t) => {
+      const img = await load(z, t.tx, t.ty);
+      if (img) ctx.drawImage(img, t.dx, t.dy, TILE, TILE);
+      return !!img;
+    }),
+  );
+  return oks.some(Boolean) ? canvas : null;
+}
+
+/**
+ * 高德 JS API 2.0 的 AMap.TileLayer.Flexible 圖層（官方文件：3D 模式下自訂圖磚用 canvas 才不受 CORS 限制）。
+ * kind: 'imagery' | 'labels'
+ */
+export function createTiandituFlexible(AMap, { tk, kind = 'imagery', zIndex }) {
+  const mem = new Map(); // 僅瀏覽器記憶體內的小型暫存：相鄰 GCJ 圖磚重複使用同一批 WGS 圖磚
   const load = (z, x, y) => {
     const key = `${z}/${x}/${y}`;
     if (mem.has(key)) return mem.get(key);
-    const p = new Promise((resolve) => {
-      const img = new Image();
-      img.onload = () => resolve(img);
-      img.onerror = () => resolve(null);
-      img.src = tileUrl(kind, tk, z, x, y);
-    });
+    // 先用 crossOrigin（3D/WebGL 需要未污染的 canvas）；若天地圖沒有回 CORS 標頭而失敗，退回一般載入（2D 模式仍可顯示）
+    const attempt = (cors) =>
+      new Promise((resolve) => {
+        const img = new Image();
+        if (cors) img.crossOrigin = 'anonymous';
+        img.onload = () => resolve(img);
+        img.onerror = () => resolve(null);
+        img.src = tileUrl(kind, tk, z, x, y);
+      });
+    const p = attempt(true).then((img) => img || attempt(false));
     mem.set(key, p);
     if (mem.size > 96) mem.delete(mem.keys().next().value);
     return p;
   };
-  const Layer = L.GridLayer.extend({
-    createTile(coords, done) {
-      const canvas = document.createElement('canvas');
-      canvas.width = canvas.height = TILE;
-      const ctx = canvas.getContext('2d');
-      // coords.z 已被 Leaflet 依 maxNativeZoom 限制；超過的縮放層級由 Leaflet 放大
-      Promise.all(
-        coveringTiles(coords.x, coords.y, coords.z).map(async (t) => {
-          const img = await load(coords.z, t.tx, t.ty);
-          if (img) ctx.drawImage(img, t.dx, t.dy, TILE, TILE);
-          return !!img;
-        }),
-      ).then((oks) => done(oks.some(Boolean) ? null : new Error('tile'), canvas));
-      return canvas;
+  return new AMap.TileLayer.Flexible({
+    cacheSize: 80,
+    zIndex: zIndex ?? (kind === 'imagery' ? 3 : 4),
+    dataZooms: [3, 18],
+    zooms: [3, 20],
+    createTile(x, y, z, success, fail) {
+      renderTile(x, y, z, load).then((c) => (c ? success(c) : fail()), () => fail());
     },
   });
-  return new Layer({ tileSize: TILE, maxZoom: 19, maxNativeZoom, attribution: kind === 'imagery' ? TIANDITU_ATTRIBUTION : undefined, zIndex: kind === 'imagery' ? 1 : 2, updateWhenIdle: true, keepBuffer: 1 });
 }
