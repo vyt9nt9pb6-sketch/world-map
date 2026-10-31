@@ -56,9 +56,10 @@ export function coveringTiles(x, y, z) {
   return out;
 }
 
+/** layer: 'imagery'|'labels'|'terrain'|'terrainLabels' → img/cia/ter/cta */
 export function tileUrl(layer, tk, z, x, y) {
   const sub = (x + y) % 8;
-  const l = layer === 'labels' ? 'cia' : 'img';
+  const l = layer === 'labels' ? 'cia' : layer === 'terrain' ? 'ter' : layer === 'terrainLabels' ? 'cta' : 'img';
   return `https://t${sub}.tianditu.gov.cn/${l}_w/wmts?SERVICE=WMTS&REQUEST=GetTile&VERSION=1.0.0&LAYER=${l}&STYLE=default&TILEMATRIXSET=w&FORMAT=tiles&TILEMATRIX=${z}&TILEROW=${y}&TILECOL=${x}&tk=${encodeURIComponent(tk)}`;
 }
 
@@ -125,11 +126,12 @@ export function createShiftedFlexible(AMap, { urlFor, zIndex = 3, opacity = 1, d
   });
 }
 
-/** 天地圖影像（img_w）或影像注記（cia_w）。kind: 'imagery' | 'labels'。全球可用；境外影像約 500 m 解析度。 */
+/** 天地圖影像／注記／地形。kind: 'imagery'|'labels'|'terrain'|'terrainLabels'。 */
 export function createTiandituFlexible(AMap, { tk, kind = 'imagery', zIndex }) {
+  const zDefault = kind === 'imagery' || kind === 'terrain' ? 3 : 4;
   return createShiftedFlexible(AMap, {
     urlFor: (z, x, y) => tileUrl(kind, tk, z, x, y),
-    zIndex: zIndex ?? (kind === 'imagery' ? 3 : 4),
+    zIndex: zIndex ?? zDefault,
     dataZooms: [3, 18],
   });
 }

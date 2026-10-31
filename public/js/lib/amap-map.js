@@ -30,7 +30,12 @@ export function loadAMap({ key, serviceHost }, doc = document, win = window) {
 const ll = (p) => [p.lng, p.lat];
 const fromLngLat = (x) => ({ lng: x.getLng(), lat: x.getLat() });
 
-export const LAYER_MODES = ['standard', 'satellite', 'tianditu', 'transit', 'landcover'];
+export const LAYER_MODES = ['standard', 'satellite', 'tianditu', 'transit', 'landcover', 'terrain'];
+export const SAT_SOURCES = ['amap', 'tianditu', 'mapbox', 'google'];
+/** 衛星類圖層（含天地圖衛星、Mapbox、Google、地形）：關閉白色 3D 樓塊，仍允許俯仰 */
+export function isImageryMode(mode) {
+  return mode === 'satellite' || mode === 'tianditu' || mode === 'terrain' || mode === 'landcover';
+}
 
 /**
  * @param AMap  window.AMap
@@ -46,13 +51,14 @@ export function createMapView(AMap, el, opts = {}) {
     pitch: 0,
     rotation: 0,
     resizeEnable: true,
-    showBuildingBlock: true,
+    showBuildingBlock: true, // 標準圖層可顯示；衛星／地形會用 setFeatures 關掉
     showLabel: true,
     rotateEnable: true,
     pitchEnable: true,
     jogEnable: true,
     animateEnable: true,
     mapStyle: opts.dark ? 'amap://styles/dark' : 'amap://styles/normal',
+    features: ['bg', 'point', 'road', 'building'],
   });
 
   const state = { mode: 'standard', labels: true, satSource: 'amap', dark: !!opts.dark, overlay: [] };
@@ -106,34 +112,63 @@ export function createMapView(AMap, el, opts = {}) {
   for (const ev of ['moveend', 'zoomend', 'dragstart']) map.on(ev, () => emit(ev === 'dragstart' ? 'dragstart' : 'viewchange', {}));
 
   // ── 圖層
-  const tdt = (kind) => make(kind === 'imagery' ? 'tdtImg' : 'tdtLabels', () => opts.createTianditu(AMap, kind));
+  const tdt = (kind) => {
+    const key = kind === 'imagery' ? 'tdtImg' : kind === 'labels' ? 'tdtLabels' : kind === 'terrain' ? 'tdtTer' : 'tdtCta';
+    return make(key, () => opts.createTianditu(AMap, kind));
+  };
   function layerSet() {
     const { mode, labels, satSource } = state;
     const set = [];
     if (mode === 'satellite' || mode === 'tianditu') {
-      const useTdt = (mode === 'tianditu' || satSource === 'tianditu') && opts.tianditu?.tk && opts.createTianditu;
-      if (useTdt) {
+      const src = mode === 'tianditu' ? 'tianditu' : satSource;
+      if (src === 'tianditu' && opts.tianditu?.tk && opts.createTianditu) {
         set.push(tdt('imagery'));
         if (labels) set.push(tdt('labels'));
+      } else if (src === 'mapbox' && opts.mapbox?.token && opts.createMapboxSat) {
+        set.push(make('mapboxSat', () => opts.createMapboxSat(AMap)));
+        if (labels) set.push(make('roadnet', () => new AMap.TileLayer.RoadNet({ zIndex: 4 })));
+      } else if (src === 'google' && opts.google?.key && opts.createGoogleSat) {
+        set.push(make('googleSat', () => opts.createGoogleSat(AMap)));
+        if (labels) set.push(make('roadnetMb', () => new AMap.TileLayer.RoadNet({ zIndex: 4 })));
       } else {
         set.push(make('sat', () => new AMap.TileLayer.Satellite({ zIndex: 2 })));
         if (labels) set.push(make('roadnet', () => new AMap.TileLayer.RoadNet({ zIndex: 3 })));
       }
     }
+    if (mode === 'terrain' && opts.tianditu?.tk && opts.createTianditu) {
+      set.push(tdt('terrain'));
+      if (labels) set.push(tdt('terrainLabels'));
+    }
     if (mode === 'landcover' && opts.createLandcover) set.push(make('worldcover', () => opts.createLandcover(AMap)));
     return set;
   }
+  /** Apple Maps 風格：衛星／地形可俯仰，但不顯示白色擠出樓塊；標準圖層保留 3D 樓塊 */
+  function applyBuildingPolicy(mode) {
+    // 與 isImageryMode 對齊：衛星／天地圖／地形／地表覆蓋都不顯示白色 3D 樓塊；仍允許 pitch
+    try {
+      if (isImageryMode(mode)) {
+        map.setFeatures(['bg']); // 關掉 building／road／point，避免白樓蓋住衛星
+        if (typeof map.setStatus === 'function') map.setStatus({ showBuildingBlock: false });
+      } else {
+        map.setFeatures(['bg', 'point', 'road', 'building']);
+        if (typeof map.setStatus === 'function') map.setStatus({ showBuildingBlock: true });
+      }
+    } catch {
+      /* 舊版 JS API 可能沒 setStatus.showBuildingBlock */
+    }
+  }
   function setLayerMode(mode, extra = {}) {
     if (!LAYER_MODES.includes(mode)) throw new Error(`unknown layer mode ${mode}`);
+    if (extra.satSource && !SAT_SOURCES.includes(extra.satSource)) throw new Error(`unknown sat source ${extra.satSource}`);
     Object.assign(state, { mode }, extra);
     const want = new Set(layerSet());
     for (const l of state.overlay) if (!want.has(l)) map.remove(l);
     for (const l of want) if (!state.overlay.includes(l)) map.add(l);
     state.overlay = [...want];
     const sat = mode === 'satellite' || mode === 'tianditu';
-    // 衛星時底圖向量圖層被圖磚蓋住；標準用預設樣式，大眾運輸用低彩度樣式讓鐵路線更醒目
-    map.setMapStyle(state.dark ? 'amap://styles/dark' : mode === 'transit' || mode === 'landcover' ? 'amap://styles/light' : 'amap://styles/normal');
-    el.dataset.layer = sat ? 'satellite' : mode;
+    map.setMapStyle(state.dark ? 'amap://styles/dark' : mode === 'transit' || mode === 'landcover' || mode === 'terrain' ? 'amap://styles/light' : 'amap://styles/normal');
+    applyBuildingPolicy(mode);
+    el.dataset.layer = sat || mode === 'terrain' ? (mode === 'terrain' ? 'terrain' : 'satellite') : mode;
   }
   function setDark(dark) {
     state.dark = !!dark;

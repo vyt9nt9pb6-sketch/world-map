@@ -186,14 +186,32 @@ async function initMap() {
   }
   const qs = new URLSearchParams(location.search);
   const startC = qs.get('lng') && qs.get('lat') ? { lng: +qs.get('lng'), lat: +qs.get('lat') } : DEFAULT_CENTER;
+  // Google Map Tiles session（瀏覽器快取；過期前重用）
+  let googleSession = { token: '', expiry: 0 };
+  const ensureGoogleSession = async () => {
+    const now = Date.now() / 1000;
+    if (googleSession.token && googleSession.expiry - 60 > now) return googleSession.token;
+    const r = await fetch('/api/google-tiles/session', { method: 'POST', credentials: 'same-origin' });
+    if (!r.ok) throw new Error('google_session');
+    const j = await r.json();
+    googleSession = { token: j.session, expiry: Number(j.expiry) || now + 86400 };
+    return googleSession.token;
+  };
+  window.__wmGoogleSession = () => googleSession.token; // Flexible createTile 同步讀取
+
   view = createMapView(AMap, $('map'), {
     center: startC,
     zoom: qs.get('z') ? Math.min(19, Math.max(3, +qs.get('z'))) : 12,
     dark: prefersDark(),
     tianditu: state.config.tianditu?.tk ? { tk: state.config.tianditu.tk } : null,
+    mapbox: state.config.mapbox?.token ? { token: state.config.mapbox.token } : null,
+    google: state.config.googleTiles?.key ? { key: state.config.googleTiles.key } : null,
     createTianditu: (A, kind) => createTiandituFlexible(A, { tk: state.config.tianditu.tk, kind }),
     createLandcover: (A) => createWorldCoverFlexible(A),
+    createMapboxSat: (A) => createMapboxSatFlexible(A, { token: state.config.mapbox.token }),
+    createGoogleSat: (A) => createGoogleSatFlexible(A, { key: state.config.googleTiles.key, getSession: () => window.__wmGoogleSession() }),
   });
+  view._ensureGoogleSession = ensureGoogleSession;
   groups = {
     results: view.group(),
     route: view.group(),
@@ -237,34 +255,59 @@ $('map-retry').addEventListener('click', async () => {
 function loadLayerPref() {
   try {
     const v = JSON.parse(localStorage.getItem(LAYER_KEY) || 'null');
-    if (v && ['standard', 'satellite', 'transit', 'landcover'].includes(v.mode)) Object.assign(state.layer, { mode: v.mode, source: v.source === 'tianditu' ? 'tianditu' : 'amap', labels: v.labels !== false });
+    const modes = ['standard', 'satellite', 'transit', 'landcover', 'terrain'];
+    const sources = ['amap', 'tianditu', 'mapbox', 'google'];
+    if (v && modes.includes(v.mode)) Object.assign(state.layer, { mode: v.mode, source: sources.includes(v.source) ? v.source : 'amap', labels: v.labels !== false });
   } catch {
     /* 略過 */
   }
 }
-function applyLayer() {
+async function applyLayer() {
   const L = state.layer;
-  const tdtOk = !!state.config?.features?.tianditu && !!state.config?.tianditu?.tk;
+  const f = state.config?.features || {};
+  const tdtOk = !!f.tianditu && !!state.config?.tianditu?.tk;
+  const mapboxOk = !!f.mapbox && !!state.config?.mapbox?.token;
+  const googleOk = !!f.googleTiles && !!state.config?.googleTiles?.key;
   if (L.source === 'tianditu' && !tdtOk) L.source = 'amap';
+  if (L.source === 'mapbox' && !mapboxOk) L.source = 'amap';
+  if (L.source === 'google' && !googleOk) L.source = 'amap';
+  if (L.mode === 'terrain' && !tdtOk) L.mode = 'standard';
+  if (L.mode === 'satellite' && L.source === 'google' && view?._ensureGoogleSession) {
+    try { await view._ensureGoogleSession(); } catch { toast('Google 衛星 session 建立失敗（大陸常需 VPN）'); L.source = 'amap'; }
+  }
   view?.setLayerMode(L.mode, { labels: L.labels, satSource: L.source });
   document.body.classList.toggle('sat', L.mode === 'satellite');
   document.querySelectorAll('#layer-cards [data-layer]').forEach((b) => b.setAttribute('aria-checked', String(b.dataset.layer === L.mode)));
   document.querySelectorAll('#opt-source [data-source]').forEach((b) => b.setAttribute('aria-checked', String(b.dataset.source === L.source)));
   $('src-tianditu').disabled = !tdtOk;
   $('src-tianditu').title = tdtOk ? '' : '尚未啟用天地圖';
+  $('src-mapbox').disabled = !mapboxOk;
+  $('src-mapbox').title = mapboxOk ? '大陸常需 VPN' : '請在 Cloudflare 設定 secret：MAPBOX_TOKEN';
+  $('src-google').disabled = !googleOk;
+  $('src-google').title = googleOk ? '大陸常需 VPN' : '請在 Cloudflare 設定 secret：GOOGLE_MAPS_TILE_KEY';
   $('opt-labels').setAttribute('aria-checked', String(L.labels));
-  $('opt-source').classList.toggle('hidden', L.mode !== 'satellite');
-  $('opt-labels').closest('.opt-row').classList.toggle('hidden', L.mode !== 'satellite');
+  const satUi = L.mode === 'satellite';
+  $('opt-source').classList.toggle('hidden', !satUi);
+  $('opt-labels').closest('.opt-row').classList.toggle('hidden', !(satUi || L.mode === 'terrain'));
   $('opt-transit-note').classList.toggle('hidden', L.mode !== 'transit');
+  $('opt-terrain-note')?.classList.toggle('hidden', L.mode !== 'terrain');
+  $('opt-sat-vpn-note')?.classList.toggle('hidden', !(satUi && (L.source === 'mapbox' || L.source === 'google')));
   const globalSat = L.mode === 'satellite' && L.source === 'tianditu';
   $('opt-global-sat').setAttribute('aria-checked', String(globalSat));
   $('opt-global-sat').disabled = !tdtOk;
   $('opt-landcover').setAttribute('aria-checked', String(L.mode === 'landcover'));
+  const terBtn = document.querySelector('#layer-cards [data-layer="terrain"]');
+  if (terBtn) { terBtn.disabled = !tdtOk; terBtn.title = tdtOk ? '' : '需要 TIANDITU_TK'; }
+
   $('landcover-legend').classList.toggle('hidden', L.mode !== 'landcover');
-  // 來源標示（CC BY 4.0 與天地圖都要求標示）
   const attrib = $('map-attrib');
-  const usingTdt = globalSat && tdtOk;
-  attrib.textContent = L.mode === 'landcover' ? '© ESA WorldCover 2021 · CC BY 4.0' : usingTdt ? TIANDITU_ATTRIBUTION : '';
+  attrib.textContent =
+    L.mode === 'landcover' ? '© ESA WorldCover 2021 · CC BY 4.0'
+    : L.mode === 'terrain' && tdtOk ? TIANDITU_ATTRIBUTION
+    : globalSat && tdtOk ? TIANDITU_ATTRIBUTION
+    : L.mode === 'satellite' && L.source === 'mapbox' ? MAPBOX_ATTRIBUTION
+    : L.mode === 'satellite' && L.source === 'google' ? GOOGLE_ATTRIBUTION
+    : '';
   attrib.classList.toggle('on', !!attrib.textContent);
   if (L.mode === 'transit') showRail();
   else hideRail();
@@ -285,13 +328,13 @@ $('layer-cards').addEventListener('click', (e) => {
   const b = e.target.closest('[data-layer]');
   if (!b) return;
   state.layer.mode = b.dataset.layer;
-  applyLayer();
+  void applyLayer();
 });
 $('opt-source').addEventListener('click', (e) => {
   const b = e.target.closest('[data-source]');
   if (!b || b.disabled) return;
   state.layer.source = b.dataset.source;
-  applyLayer();
+  void applyLayer();
 });
 $('opt-global-sat').addEventListener('click', () => {
   const on = $('opt-global-sat').getAttribute('aria-checked') === 'true';

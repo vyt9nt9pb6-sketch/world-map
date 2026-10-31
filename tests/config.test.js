@@ -2,14 +2,14 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { handleApiRequest } from '../core/handlers.js';
 import { securityHeaders } from '../core/security.js';
-import { fakeFetch, req, FAKE_KEY } from './helpers.js';
+import { fakeFetch, req, post, FAKE_KEY } from './helpers.js';
 
 const base = { AMAP_KEY: FAKE_KEY, MAIL_PROVIDER: 'brevo', MAIL_FROM: 'a@b.co', BREVO_API_KEY: 'BREVO_SECRET', AMAP_JS_SECURITY_CODE: 'SECURITYCODE123' };
 
 test('config：什麼都沒設定 → 全部功能關閉，不洩漏任何秘密', async () => {
   const res = await handleApiRequest(req('/api/config'), { AMAP_KEY: FAKE_KEY }, {});
   const body = await res.json();
-  assert.deepEqual(body.features, { auth: false, tianditu: false, amap3d: false });
+  assert.deepEqual(body.features, { auth: false, tianditu: false, amap3d: false, mapbox: false, googleTiles: false, terrain: false });
   assert.equal(body.tianditu, null);
   assert.equal(body.amap3d, null);
   assert.equal(res.headers.get('cache-control'), 'no-store');
@@ -20,7 +20,7 @@ test('config：有設定才啟用；只回傳瀏覽器型金鑰，不回傳 Web 
   const res = await handleApiRequest(req('/api/config'), env, {});
   const text = await res.text();
   const body = JSON.parse(text);
-  assert.deepEqual(body.features, { auth: true, tianditu: true, amap3d: true });
+  assert.deepEqual(body.features, { auth: true, tianditu: true, amap3d: true, mapbox: false, googleTiles: false, terrain: true });
   assert.equal(body.tianditu.tk, 'TDT_BROWSER_TK');
   assert.deepEqual(body.amap3d, { key: 'JSKEY123', serviceHost: '/_AMapService' });
   for (const secret of [FAKE_KEY, 'BREVO_SECRET', 'SECURITYCODE123']) assert.ok(!text.includes(secret), secret);
@@ -81,6 +81,35 @@ test('安全標頭：單一 CSP 只放行高德 JS API／圖磚，不開放內�
   assert.match(csp, /img-src[^;]*tianditu\.gov\.cn/);
   assert.match(csp, /img-src[^;]*mapproxy\.terrascope\.be/);
   assert.match(csp, /connect-src 'self' data: blob: https:\/\/\*\.amap\.com/);
-  assert.ok(!/google|mapbox/i.test(csp));
+  assert.match(csp, /img-src[^;]*api\.mapbox\.com/);
+  assert.match(csp, /img-src[^;]*tile\.googleapis\.com/);
+  assert.match(csp, /connect-src[^;]*tile\.googleapis\.com/);
   assert.match(csp, /frame-ancestors 'none'/);
 });
+
+test('config：MAPBOX_TOKEN／GOOGLE_MAPS_TILE_KEY 有設定才開啟對應功能', async () => {
+  const env = { ...base, MAPBOX_TOKEN: 'pk.test_mapbox', GOOGLE_MAPS_TILE_KEY: 'AIza_TEST_GOOGLE' };
+  const res = await handleApiRequest(req('/api/config'), env, {});
+  const text = await res.text();
+  const body = JSON.parse(text);
+  assert.equal(body.features.mapbox, true);
+  assert.equal(body.features.googleTiles, true);
+  assert.equal(body.mapbox.token, 'pk.test_mapbox');
+  assert.equal(body.googleTiles.key, 'AIza_TEST_GOOGLE');
+  for (const secret of [FAKE_KEY, 'BREVO_SECRET', 'SECURITYCODE123']) assert.ok(!text.includes(secret), secret);
+});
+
+test('google-tiles/session：未設定 key → 404；有 key 則轉發 createSession', async () => {
+  assert.equal((await handleApiRequest(post('/api/google-tiles/session', {}), { AMAP_KEY: FAKE_KEY }, {})).status, 404);
+  const f = fakeFetch(() => ({ session: 'SESS123', expiry: '9999999999', tileWidth: 256, tileHeight: 256 }));
+  const res = await handleApiRequest(post('/api/google-tiles/session', {}), { ...base, GOOGLE_MAPS_TILE_KEY: 'AIza_TEST' }, { fetchImpl: f });
+  assert.equal(res.status, 200);
+  const text = await res.text();
+  const body = JSON.parse(text);
+  assert.equal(body.session, 'SESS123');
+  assert.ok(!text.includes('AIza_TEST'));
+  assert.ok(f.calls[0].url.href.includes('tile.googleapis.com/v1/createSession'));
+  assert.ok(f.calls[0].url.href.includes('key=AIza_TEST'));
+  assert.equal(f.calls[0].init.method, 'POST');
+});
+

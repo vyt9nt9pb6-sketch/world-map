@@ -60,6 +60,45 @@ window.WorldMapEnv.registerProvider({
 
 **開源參考（只參考做法，沒複製程式碼）：** [htoooth/Leaflet.ChineseTmsProviders](https://github.com/htoooth/Leaflet.ChineseTmsProviders)（MIT；提供天地圖／高德圖磚網址，**不處理偏移**，issue #43「切換底圖，座標偏差」就是這個問題）；[gisarmory/Leaflet.InternetMapCorrection](https://github.com/gisarmory/Leaflet.InternetMapCorrection)（以重算每張圖磚位置來糾偏，與我們的做法同原理；**倉庫沒有明確授權檔案，所以沒有複製任何程式碼**，也有自己的免責聲明）；糾偏演算法為公開演算法（`coords.js` 自行實作）。WorldCover 疊加層的做法（WMTS＋半透明＋圖例）是 ESA 官方文件與 Leaflet/MapLibre 常見用法。
 
+
+### 中國大陸連線診斷（workers.dev 逾時／打不開）— 2026-10-31
+
+**根因（已查證）：`*.workers.dev` 在中國大陸被全面封鎖。** [GreatFire](https://en.greatfire.org/domain/workers.dev) 截至 2026-10-30 對 workers.dev 下可判定的 URL 全部標記為 Blocked（DNS 污染、連線逾時／靜默丟包、連線失敗）。Cloudflare 社群與多個開源專案（例如 WPILib #8467）也確認「不能用 workers.dev 給大陸用戶用，必須掛自訂網域」。因此目前 `https://world-map.kwok-worldmap.workers.dev` **不是「慢」，是網域本身進不了大陸網路**；本機（海外）無法代替大陸探測，請 Kwok 用大陸手機／[ITDOG](https://www.itdog.cn/)／[GreatFire](https://en.greatfire.org/) 驗證。
+
+**已檢查、與「逾時」無關或幫助有限的項目：**
+- 高德 JS 已從中國端點 `https://webapi.amap.com` 載入（不是海外 CDN）。
+- `/_AMapService` 只代理 JS API 的安全密鑰相關請求（樣式／log／部分 Web 服務），圖磚仍直連 `*.amap.com`；會多一跳但不是打不開的主因。
+- Worker 靜態打包約 400 KB；Cloudflare 會 gzip。減 JS 有幫助但是次要。
+- 帳號下 **沒有任何 Cloudflare Zone／自訂網域**（查過 zones／workers domains 皆空），所以目前沒有可切換的備用 hostname。
+
+**可行方案（需要 Kwok 決定；未代購網域）：**
+
+| 方案 | 大陸可達？ | 費用（約） | 說明 |
+|---|---|---|---|
+| **A. 自訂網域綁 Worker**（建議） | 通常可（視 CF 節點／ISP） | `.com` 約 **US$10–15／年**（Cloudflare Registrar／Namecheap 等）；`.cn` 約 **¥30–55／年** 且若要在大陸「備案託管」需 ICP（數週～數月） | 把域名 NS 轉到 Cloudflare → Workers → Custom Domains 綁 `world-map`。**不買 Cloudflare China Network 也能試**；若部分省市仍慢／被牆，再考慮「優選 IP／CNAME 到優選域名、關小黃雲」等社群做法。 |
+| B. 靜態資源鏡到國內 CDN | 只能加速 HTML／JS；API 仍在 Worker | 國內 CDN 另計；源站仍要可連 | 治標不治本：首屏或許快，但 `/api/*` 若仍走被牆的 workers.dev 一樣失敗。 |
+| C. 國內主機／反向代理反代 Worker | 可以 | VPS 約 ¥30+/月 | 用國內 IP 反代到 Worker；要自己維護證書與合規。 |
+| D. Cloudflare China Network | 較穩 | 企業級，貴，且通常要 ICP | 不建議個人專案起步就上。 |
+
+**沒有「免買網域」的可靠解法。** freenom 等免費域名在大陸同樣不穩／常被牆。若 Kwok **已經有** `.com`／`.cn`／其他域名，把域名加進這個 Cloudflare 帳號並綁 Custom Domain 即可，**不必新買**。綁定後還要在高德／天地圖控制台把新網域加入 key 白名單。
+
+**請 Kwok 回覆：** (1) 是否已有可綁的域名（名稱）？(2) 若沒有，要不要買 `.com`（建議）？確認前 **不會代購**。
+
+### Mapbox／Google 衛星與地形圖（寫程式前的調查）
+
+- **Mapbox：** 官方 Raster Tiles `https://api.mapbox.com/v4/mapbox.satellite/{z}/{x}/{y}@2x.jpg?access_token=`（satellite-v9／mapbox.satellite）。瀏覽器型 token；大陸常需 VPN。Secret 名：**`MAPBOX_TOKEN`**。
+- **Google：** 官方 [Map Tiles API](https://developers.google.com/maps/documentation/tile/satellite) ——先 `POST …/createSession`（mapType=satellite）再 `GET …/2dtiles/{z}/{x}/{y}?session=&key=`。createSession 走同源 `/api/google-tiles/session` 避免瀏覽器 CORS；圖磚仍客戶端直連。Secret 名：**`GOOGLE_MAPS_TILE_KEY`**。未設定時功能旗標為 false。大陸常需 VPN。
+- **地形：** 天地圖官方 `ter_w`（暈渲）＋`cta_w`（注記），與現有 `TIANDITU_TK` 共用；開源參考 [htoooth/Leaflet.ChineseTmsProviders](https://github.com/htoooth/Leaflet.ChineseTmsProviders)（MIT，只參考 URL 格式，未複製程式碼）。
+- 座標：Mapbox／Google／天地圖地形皆 WGS-84，沿用 `createShiftedFlexible` 只在中國境內平移。
+
+### 高德 Logo
+
+高德開放平台 FAQ／服務協議明確：**不得刪除、遮擋、隱藏、修改或替換**「高德地圖」Logo 與審圖號。因此 **沒有移除**，只做縮小＋降低對比（仍可見）。
+
+### 衛星 3D 樓塊
+
+高德 `showBuildingBlock`／`features` 含 `building` 時，衛星圖上會疊白色擠出樓塊。做法：衛星／天地圖衛星／地形模式下 `setFeatures(['bg'])` 並嘗試關閉 building block；**標準圖層保留 3D 樓塊**；俯仰（pitch）仍可用（Apple Maps 風格）。
+
 ### 取捨與限制
 - 大眾運輸圖層是「示意」：淡化底圖＋OSM 鐵路線與車站（站點連線，不是真實軌道幾何）；公車／地鐵圖層高德沒有公開圖磚。
 - 天地圖與地表覆蓋現在以 `AMap.TileLayer.Flexible` 疊加（WebGL 需要未被汙染的 canvas，會先嘗試 CORS，失敗改用一般圖片載入）；開發機在海外被天地圖 WAF 擋（418），**無法在這裡驗證**，需在大陸手機實測。

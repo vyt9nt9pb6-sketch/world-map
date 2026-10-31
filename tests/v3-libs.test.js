@@ -155,3 +155,22 @@ test('createShiftedFlexible／createWorldCoverFlexible 以 AMap.TileLayer.Flexib
   createShiftedFlexible(AMap, { urlFor: () => 'x' });
   assert.equal(opt.opacity, 1);
 });
+
+import { mapboxSatUrl, googleSatUrl, createMapboxSatFlexible } from '../public/js/lib/ext-sat.js';
+import { tileUrl as tdtTileUrl } from '../public/js/lib/tianditu.js';
+
+test('Mapbox／Google 衛星 URL 與地形 ter／cta', () => {
+  assert.match(mapboxSatUrl('pk.abc', 8, 10, 20), /^https:\/\/api\.mapbox\.com\/v4\/mapbox\.satellite\/8\/10\/20@2x\.jpg\?access_token=pk\.abc$/);
+  assert.match(googleSatUrl('KEY', 'SESS', 5, 1, 2), /tile\.googleapis\.com\/v1\/2dtiles\/5\/1\/2\?session=SESS&key=KEY/);
+  assert.match(tdtTileUrl('terrain', 'TK', 7, 3, 4), /\/ter_w\/wmts\?/);
+  assert.match(tdtTileUrl('terrainLabels', 'TK', 7, 3, 4), /\/cta_w\/wmts\?.*LAYER=cta/);
+  assert.ok(LAYER_MODES.includes('terrain'));
+});
+
+test('createMapboxSatFlexible 用 Flexible', () => {
+  let Flexible;
+  const AMap = { TileLayer: { Flexible: function (o) { Flexible = o; } } };
+  createMapboxSatFlexible(AMap, { token: 'pk.x' });
+  assert.equal(typeof Flexible.createTile, 'function');
+  assert.equal(Flexible.zIndex, 3);
+});

@@ -31,7 +31,7 @@ import { createRailMatcher } from './rail.js';
 import railData from './rail-data.js';
 import { requestCode, verifyCode, logout, me, assertSameOrigin } from './auth.js';
 import { getFavorites, syncFavorites } from './favorites.js';
-import { getConfig, amapServiceProxy } from './config.js';
+import { getConfig, amapServiceProxy, createGoogleTileSession } from './config.js';
 
 const AMAP_BASE = 'https://restapi.amap.com';
 const UPSTREAM_TIMEOUT_MS = 10000;
@@ -363,6 +363,7 @@ const ROUTES = {
   '/api/environment': { GET: raw(handleEnvironment) },
   '/api/rail-lines': { GET: raw(handleRailLines) },
   '/api/config': { GET: raw(getConfig) },
+  '/api/google-tiles/session': { POST: raw(createGoogleTileSession, true) },
   '/api/auth/request-code': { POST: raw(requestCode, true) },
   '/api/auth/verify': { POST: raw(verifyCode, true) },
   '/api/auth/logout': { POST: raw(logout, true) },

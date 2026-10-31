@@ -231,22 +231,29 @@
         <div class="layer-cards" id="layer-cards" role="radiogroup" aria-label="地圖類型">
           <button type="button" class="layer-card" role="radio" data-layer="standard" aria-checked="true"><i class="thumb thumb-standard"></i><span>標準</span></button>
           <button type="button" class="layer-card" role="radio" data-layer="satellite" aria-checked="false"><i class="thumb thumb-satellite"></i><span>衛星</span></button>
+          <button type="button" class="layer-card" role="radio" data-layer="terrain" aria-checked="false"><i class="thumb thumb-terrain"></i><span>地形</span></button>
           <button type="button" class="layer-card" role="radio" data-layer="transit" aria-checked="false"><i class="thumb thumb-transit"></i><span>大眾運輸</span></button>
         </div>
         <div class="card layer-opts">
           <div class="opt-row" id="opt-source">
             <span>衛星來源</span>
-            <div class="seg-ctl" role="radiogroup">
+            <div class="seg-ctl wrap" role="radiogroup">
               <button type="button" role="radio" data-source="amap" aria-checked="true">高德</button>
               <button type="button" role="radio" data-source="tianditu" aria-checked="false" id="src-tianditu">天地圖</button>
+              <button type="button" role="radio" data-source="mapbox" aria-checked="false" id="src-mapbox" disabled title="尚未設定 MAPBOX_TOKEN">Mapbox</button>
+              <button type="button" role="radio" data-source="google" aria-checked="false" id="src-google" disabled title="尚未設定 GOOGLE_MAPS_TILE_KEY">Google</button>
             </div>
           </div>
+          <p id="opt-sat-vpn-note" class="muted small hidden">Mapbox／Google 衛星在中國大陸常需 VPN 才能載入圖磚。</p>
           <div class="opt-row">
             <span>道路與地名標註</span>
             <button type="button" class="switch" id="opt-labels" role="switch" aria-checked="true" aria-label="道路與地名標註"><i></i></button>
           </div>
           <div class="opt-row" id="opt-transit-note">
             <span class="muted small">大眾運輸圖層：淡化底圖，疊上全國鐵路線與車站（OpenStreetMap，示意用）。</span>
+          </div>
+          <div class="opt-row" id="opt-terrain-note" class="hidden">
+            <span class="muted small">地形圖：天地圖地形暈渲（ter_w）＋注記（cta_w）。中國境內自動平移對齊高德。</span>
           </div>
         </div>
         <!-- 全球圖層：天地圖全球衛星、全球地表覆蓋（ESA WorldCover） -->
