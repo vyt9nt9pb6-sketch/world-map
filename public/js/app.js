@@ -313,7 +313,7 @@ async function showRail() {
   groups.rail.clear();
   for (const l of railData.lines) {
     if (l.pts.length < 2) continue;
-    groups.rail.add(view?.polyline({ path: l.pts.map((p) => [p.lng, p.lat]), color: '#c1121f', weight: 3, opacity: 0.85, zIndex: 20 }));
+    groups.rail.add(view?.polyline({ path: l.pts.map((p) => [p.lng, p.lat]), color: '#c1121f', weight: 2.5, opacity: 0.7, zIndex: 20 }));
   }
   drawRailStations();
 }

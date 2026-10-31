@@ -217,21 +217,29 @@ export function createMapView(AMap, el, opts = {}) {
     if (!pts.length) return;
     const { top = 90, right = 40, bottom = 40, left = 40 } = pad;
     if (pts.length === 1) return flyTo(pts[0], Math.max(map.getZoom(), 15), pad);
+    // 自己算縮放層級（AMap.setBounds 帶 padding 時在手機上會縮得過頭）
     const lngs = pts.map((p) => p.lng);
     const lats = pts.map((p) => p.lat);
-    const b = new AMap.Bounds([Math.min(...lngs), Math.min(...lats)], [Math.max(...lngs), Math.max(...lats)]);
-    map.setBounds(b, false, [top, right, bottom, left]);
+    const w = Math.max(60, el.clientWidth - left - right);
+    const h = Math.max(60, el.clientHeight - top - bottom);
+    const merc = (lat) => Math.log(Math.tan(Math.PI / 4 + (Math.max(-85, Math.min(85, lat)) * Math.PI) / 360));
+    const lngSpan = Math.max(1e-6, Math.max(...lngs) - Math.min(...lngs)) / 360; // 佔世界寬度的比例
+    const latSpan = Math.max(1e-6, merc(Math.max(...lats)) - merc(Math.min(...lats))) / (2 * Math.PI);
+    const zx = Math.log2(w / (256 * lngSpan));
+    const zy = Math.log2(h / (256 * latSpan));
+    const z = Math.max(3, Math.min(18, Math.floor(Math.min(zx, zy) * 10) / 10 - 0.15));
+    flyTo({ lng: (Math.min(...lngs) + Math.max(...lngs)) / 2, lat: (Math.min(...lats) + Math.max(...lats)) / 2 }, z, pad, false);
   }
   /** 讓 p 出現在「可見區域」（扣掉頂部與底部面板）的正中央 */
-  function flyTo(p, zoom, pad = {}) {
+  function flyTo(p, zoom, pad = {}, animate = true) {
     const z = zoom ?? map.getZoom();
-    map.setZoomAndCenter(z, ll(p), true);
+    map.setZoomAndCenter(z, ll(p), animate);
     const { top = 0, bottom = 0 } = pad;
     if (top || bottom) {
       const h = el.clientHeight;
       const w = el.clientWidth;
       const vy = (top + (h - bottom)) / 2;
-      map.setCenter(map.containerToLngLat(new AMap.Pixel(w / 2, h - vy)), true);
+      map.setCenter(map.containerToLngLat(new AMap.Pixel(w / 2, h - vy)), animate);
     }
   }
   /** 點若被面板蓋住或在畫面外，才移動地圖 */

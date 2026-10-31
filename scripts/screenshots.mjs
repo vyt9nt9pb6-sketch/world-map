@@ -136,8 +136,9 @@ await wm(() => window.__worldMap.setSnap?.('peek'));
 await page.click('#btn-locate');
 await page.waitForTimeout(1500);
 await page.click('#btn-3d');
-await page.waitForTimeout(3500);
-await shot('10-3d-toggle', 2500);
+await page.waitForTimeout(900); // 無 WebGL 時，這時會顯示「無法使用 3D」的提示
+await page.screenshot({ path: out + 'v3-iphone-10-3d-toggle.png' });
+made.push('v3-iphone-10-3d-toggle.png');
 const info3d = await wm(() => ({ pitch: window.__worldMap.view?.map?.getPitch?.(), webgl: !!document.createElement('canvas').getContext('webgl') }));
 
 console.log(JSON.stringify({ made, tapName, chips, envText: envText.replace(/\s+/g, ' ').slice(0, 160), info3d, errors: errors.slice(0, 8) }, null, 1));
