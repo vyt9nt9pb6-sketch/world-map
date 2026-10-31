@@ -498,7 +498,8 @@ function renderHistory(filter = '') {
   $('history-block').classList.toggle('hidden', !shown.length);
   const ul = $('history-list');
   ul.innerHTML = '';
-  for (const q of shown) {
+  for (const item of shown) {
+    const q = item.q;
     const li = document.createElement('li');
     li.innerHTML = `<span class="ico"><svg><use href="#i-clock" /></svg></span><div class="body"><div class="name">${esc(q)}</div></div><button type="button" class="del" aria-label="刪除這筆記錄"><svg><use href="#i-close" /></svg></button>`;
     li.addEventListener('click', (e) => {
