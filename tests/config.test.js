@@ -63,6 +63,16 @@ test('_AMapService：自訂地圖樣式走 webapi.amap.com；金鑰不符、路�
   assert.equal(f.calls.length, 1);
 });
 
+test('_AMapService：JSONP（callback）回應標成 JavaScript；callback 格式不符 → 400', async () => {
+  const env = { ...base, AMAP_JS_KEY: 'JSKEY123' };
+  const f = fakeFetch(() => ({ ok: 1 }));
+  const ok = await handleApiRequest(req('/_AMapService/v3/log/init?key=JSKEY123&callback=jsonp_1_2_'), env, { fetchImpl: f });
+  assert.match(ok.headers.get('content-type'), /^text\/javascript/);
+  const bad = await handleApiRequest(req('/_AMapService/v3/log/init?key=JSKEY123&callback=a(b)'), env, { fetchImpl: f });
+  assert.equal(bad.status, 400);
+  assert.equal(f.calls.length, 1);
+});
+
 test('安全標頭：主頁嚴格 CSP；只有 3d.html 放寬並允許高德 JS API', () => {
   const main = securityHeaders('/')['content-security-policy'];
   assert.match(main, /script-src 'self';/);

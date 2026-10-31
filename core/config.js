@@ -40,6 +40,8 @@ export async function amapServiceProxy(ctx) {
   const url = new URL(request.url);
   const sub = url.pathname.replace(/^\/_AMapService/, '');
   if (!ALLOWED_PREFIX.test(sub) || sub.includes('..')) throw new HttpError(404, 'not_found', '找不到此服務');
+  const cb = url.searchParams.get('callback');
+  if (cb !== null && !/^[A-Za-z0-9_.$]{1,80}$/.test(cb)) throw new HttpError(400, 'bad_callback', 'callback 格式不正確');
   if (url.searchParams.get('key') !== jsKey) throw new HttpError(403, 'forbidden', '金鑰不符');
   const isStyle = sub.startsWith('/v4/map/styles');
   const up = new URL((isStyle ? 'https://webapi.amap.com' : 'https://restapi.amap.com') + sub);
@@ -54,7 +56,9 @@ export async function amapServiceProxy(ctx) {
   return new Response(res.body, {
     status: res.status,
     headers: {
-      'content-type': res.headers.get('content-type') || 'application/json; charset=utf-8',
+      // 高德 JS API 會用 <script> 以 JSONP（callback=…）呼叫 log/init 等端點；上游標成 application/json，
+      // 但我們有 nosniff，所以 JSONP 回應要明確標成 JavaScript，否則瀏覽器拒絕執行。
+      'content-type': cb !== null ? 'text/javascript; charset=utf-8' : res.headers.get('content-type') || 'application/json; charset=utf-8',
       'cache-control': 'private, max-age=300',
       'x-content-type-options': 'nosniff',
     },
