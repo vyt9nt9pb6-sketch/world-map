@@ -2,6 +2,7 @@
 // 由 scripts/build-worker.mjs 打包；ASSETS 介面與 Workers Static Assets 相同，worker/index.js 不必改。
 import worker from './index.js';
 import { ASSETS_MAP } from 'virtual:assets';
+import { securityHeaders } from '../core/security.js';
 
 const decoded = new Map();
 function body(path) {
@@ -28,8 +29,7 @@ const assets = {
       'content-type': a.type,
       etag,
       'cache-control': a.type.startsWith('text/html') ? 'no-cache' : 'public, max-age=3600',
-      'x-content-type-options': 'nosniff',
-      'referrer-policy': 'strict-origin-when-cross-origin',
+      ...securityHeaders(path),
     };
     if (request.headers.get('if-none-match') === etag) return new Response(null, { status: 304, headers });
     return new Response(request.method === 'HEAD' ? null : body(path), { status: 200, headers });

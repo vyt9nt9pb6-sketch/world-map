@@ -113,15 +113,65 @@ export function validateGeocode(params) {
   };
 }
 
+/** 導航方式：driving 駕車、walking 步行、bicycling 騎行、electrobike 電動車、transit 公交／鐵路（含火車） */
+export const ROUTE_MODES = { driving: 1, walking: 1, bicycling: 1, electrobike: 1, transit: 1 };
+
+/** 公交策略：高德 v5 transit strategy 代碼 */
+export const TRANSIT_STRATEGIES = {
+  recommend: '0', // 推薦
+  cheapest: '1', // 最經濟
+  least_transfer: '2', // 最少換乘
+  least_walk: '3', // 最少步行
+  comfortable: '5', // 不乘地鐵
+  subway_first: '7', // 地鐵優先
+  fastest: '8', // 時間短
+};
+
+const CITY_CODE = /^[0-9]{3,6}$/;
+export function cityCode(params, field) {
+  const raw = params.get(field);
+  if (raw == null || raw.trim() === '') return undefined;
+  if (!CITY_CODE.test(raw.trim())) throw new ValidationError(field, `${field} 必須是城市區號或行政區代碼`);
+  return raw.trim();
+}
+
 export function validateRoute(params) {
+  const mode = oneOf(params, 'mode', ROUTE_MODES, 'driving');
   const v = {
+    mode,
+    city1: cityCode(params, 'city1'),
+    city2: cityCode(params, 'city2'),
     origin: lngLat(params, 'origin', { required: true }),
     destination: lngLat(params, 'destination', { required: true }),
     waypoints: lngLatList(params, 'waypoints', { max: 16 }),
-    strategy: oneOf(params, 'strategy', ROUTE_STRATEGIES, 'recommend'),
+    strategy:
+      mode === 'driving'
+        ? oneOf(params, 'strategy', ROUTE_STRATEGIES, 'recommend')
+        : mode === 'transit'
+          ? oneOf(params, 'strategy', TRANSIT_STRATEGIES, 'recommend')
+          : 'recommend',
     originId: poiId(params, 'origin_id'),
     destinationId: poiId(params, 'destination_id'),
   };
   if (v.origin === v.destination) throw new ValidationError('destination', '起點和終點相同');
+  if (mode !== 'driving' && v.waypoints.length) throw new ValidationError('waypoints', '只有駕車支援途經點');
   return v;
+}
+
+/** 附近搜尋的種類 → 高德 POI 分類碼 */
+export const NEARBY_TYPES = {
+  toilet: '200300', // 公共厠所
+  gas: '010100', // 加油站
+  ev: '011100', // 充電站
+};
+
+export function validateNearby(params) {
+  const kind = oneOf(params, 'kind', NEARBY_TYPES, undefined);
+  if (!kind) throw new ValidationError('kind', '缺少參數 kind');
+  return {
+    kind,
+    location: lngLat(params, 'location', { required: true }),
+    radius: int(params, 'radius', { min: 100, max: 10000, def: 3000 }),
+    limit: int(params, 'limit', { min: 1, max: 25, def: 25 }),
+  };
 }

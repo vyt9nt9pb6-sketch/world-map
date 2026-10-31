@@ -11,7 +11,14 @@ const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', 'p
 const PORT = Number(process.env.PORT || 8787);
 const HOST = process.env.HOST || '127.0.0.1';
 
-const env = { AMAP_KEY: process.env.AMAP_KEY, ALLOWED_ORIGINS: process.env.ALLOWED_ORIGINS };
+import { securityHeaders } from '../core/security.js';
+
+// 只傳入需要的環境變數（金鑰只在後端使用）。本機沒有 Workers KV：登入／收藏用記憶體儲存，重啟即清空。
+const ENV_NAMES = [
+  'AMAP_KEY', 'ALLOWED_ORIGINS', 'AUTH_SECRET', 'MAIL_PROVIDER', 'MAIL_FROM', 'MAIL_FROM_NAME', 'MAIL_DAILY_LIMIT',
+  'BREVO_API_KEY', 'RESEND_API_KEY', 'TIANDITU_TK', 'AMAP_JS_KEY', 'AMAP_JS_SECURITY_CODE',
+];
+const env = Object.fromEntries(ENV_NAMES.filter((k) => process.env[k]).map((k) => [k, process.env[k]]));
 if (!env.AMAP_KEY) console.warn('[world-map] 警告：未設定 AMAP_KEY，/api 會回傳錯誤');
 
 // 每個 IP 與全站總量限流（見 core/ratelimit.js）
@@ -30,14 +37,7 @@ const TYPES = {
   '.txt': 'text/plain; charset=utf-8',
 };
 
-export const SECURITY_HEADERS = {
-  'x-content-type-options': 'nosniff',
-  'referrer-policy': 'strict-origin-when-cross-origin',
-  'x-frame-options': 'DENY',
-  'permissions-policy': 'geolocation=(self), camera=(), microphone=()',
-  'content-security-policy':
-    "default-src 'self'; img-src 'self' data: https://*.is.autonavi.com; style-src 'self' 'unsafe-inline'; script-src 'self'; connect-src 'self'; frame-ancestors 'none'; base-uri 'self'",
-};
+export const SECURITY_HEADERS = securityHeaders('/');
 
 async function serveStatic(req, res, pathname) {
   let rel = decodeURIComponent(pathname);
@@ -53,7 +53,7 @@ async function serveStatic(req, res, pathname) {
     res.writeHead(200, {
       'content-type': TYPES[ext] || 'application/octet-stream',
       'cache-control': ext === '.html' ? 'no-cache' : 'public, max-age=300',
-      ...SECURITY_HEADERS,
+      ...securityHeaders(pathname),
     });
     res.end(req.method === 'HEAD' ? undefined : body);
   } catch {
@@ -69,13 +69,24 @@ function send(res, status, text) {
 const server = http.createServer(async (req, res) => {
   const url = new URL(req.url, `http://${req.headers.host || 'localhost'}`);
   try {
-    if (url.pathname.startsWith('/api/')) {
+    if (url.pathname.startsWith('/api/') || url.pathname.startsWith('/_AMapService/')) {
       const headers = new Headers();
       for (const [k, v] of Object.entries(req.headers)) if (typeof v === 'string') headers.set(k, v);
-      const request = new Request(url, { method: req.method, headers });
+      let body;
+      if (req.method === 'POST') {
+        const chunks = [];
+        let size = 0;
+        for await (const c of req) {
+          size += c.length;
+          if (size > 300 * 1024) return send(res, 413, 'Too large');
+          chunks.push(c);
+        }
+        body = Buffer.concat(chunks);
+      }
+      const request = new Request(url, { method: req.method, headers, body });
       const response = await handleApiRequest(request, env, { rateLimiter, remoteAddress: req.socket.remoteAddress });
       const out = Object.fromEntries(response.headers);
-      res.writeHead(response.status, { ...out, ...SECURITY_HEADERS });
+      res.writeHead(response.status, { ...out, ...securityHeaders('/api') });
       res.end(Buffer.from(await response.arrayBuffer()));
       // 只記錄路徑與狀態碼，不記錄查詢字串
       console.log(`${new Date().toISOString()} ${req.method} ${url.pathname} ${response.status}`);

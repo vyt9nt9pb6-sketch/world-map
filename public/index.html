@@ -13,6 +13,8 @@
     <link rel="icon" href="/icons/icon.svg" type="image/svg+xml" />
     <link rel="apple-touch-icon" href="/icons/icon-180.png" />
     <link rel="stylesheet" href="/vendor/leaflet/leaflet.css" />
+    <link rel="stylesheet" href="/vendor/markercluster/MarkerCluster.css" />
+    <link rel="stylesheet" href="/vendor/markercluster/MarkerCluster.Default.css" />
     <link rel="stylesheet" href="/css/app.css" />
   </head>
   <body>
@@ -27,8 +29,26 @@
       <button id="btn-labels" class="fab small hidden" type="button" aria-pressed="true" title="衛星圖上的道路與地名">標註</button>
     </div>
 
+    <!-- 圖層選單 -->
+    <div id="layer-menu" class="layer-menu hidden" role="menu" aria-label="圖層">
+      <button type="button" role="menuitemradio" data-layer="standard">標準地圖<small>高德</small></button>
+      <button type="button" role="menuitemradio" data-layer="satellite">衛星圖<small>高德</small></button>
+      <button type="button" role="menuitemradio" data-layer="tianditu" id="layer-tianditu">衛星圖<small id="tianditu-note">天地圖</small></button>
+      <button type="button" role="menuitem" data-layer="3d" id="layer-3d">3D 地圖<small id="amap3d-note">高德</small></button>
+    </div>
+
+    <!-- 左上：附近搜尋 -->
+    <div class="nearby-bar" id="nearby-bar" role="group" aria-label="搜尋附近">
+      <button type="button" class="chip" data-kind="toilet">🚻 廁所</button>
+      <button type="button" class="chip" data-kind="gas">⛽ 加油站</button>
+      <button type="button" class="chip" data-kind="ev">🔌 充電站</button>
+    </div>
+
     <!-- 右下：定位 -->
     <div class="fab-group bottom-right" id="fab-bottom">
+      <button id="btn-mark" class="fab round" type="button" aria-label="標記並分享我的位置" title="標記並分享我的位置">
+        <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M18 16.08c-.76 0-1.44.3-1.96.77L8.91 12.7a3.3 3.3 0 0 0 0-1.4l7.05-4.11A2.99 2.99 0 1 0 15 5c0 .24.04.47.09.7L8.04 9.81a3 3 0 1 0 0 4.38l7.12 4.16c-.05.21-.08.43-.08.65A2.92 2.92 0 1 0 18 16.08Z"/></svg>
+      </button>
       <button id="btn-locate" class="fab round" type="button" aria-label="定位到我的位置" title="我的位置">
         <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M12 8a4 4 0 1 0 0 8 4 4 0 0 0 0-8Zm8.94 3A9 9 0 0 0 13 3.06V1h-2v2.06A9 9 0 0 0 3.06 11H1v2h2.06A9 9 0 0 0 11 20.94V23h2v-2.06A9 9 0 0 0 20.94 13H23v-2h-2.06ZM12 19a7 7 0 1 1 0-14 7 7 0 0 1 0 14Z"/></svg>
       </button>
@@ -51,6 +71,7 @@
           <button type="submit" class="primary-btn">搜尋</button>
         </form>
         <div id="route-shortcut" class="route-shortcut">
+          <button type="button" id="btn-open-favs" class="secondary-btn">⭐ 收藏</button>
           <button type="button" id="btn-open-route" class="secondary-btn">
             <svg viewBox="0 0 24 24" aria-hidden="true"><path d="M21.71 11.29 12.71 2.29a1 1 0 0 0-1.42 0l-9 9a1 1 0 0 0 0 1.42l9 9a1 1 0 0 0 1.42 0l9-9a1 1 0 0 0 0-1.42ZM14 14.5V12h-4v3H8v-4a1 1 0 0 1 1-1h5V7.5l3.5 3.5-3.5 3.5Z"/></svg>
             路線規劃
@@ -58,6 +79,7 @@
         </div>
         <div id="search-status" class="status" role="status" aria-live="polite"></div>
         <ul id="results" class="results"></ul>
+        <p class="credits">地圖 © 高德地圖；鐵路線路資料 © <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap contributors</a>（<a href="https://opendatacommons.org/licenses/odbl/1-0/" target="_blank" rel="noopener">ODbL</a>），車次停靠站由高德提供；線路名稱為依停靠站推測。</p>
       </div>
 
       <!-- 選中地點 -->
@@ -74,13 +96,24 @@
           <button type="button" class="secondary-btn big" id="place-as-start">設為起點</button>
           <button type="button" class="secondary-btn big" id="place-as-via">加入途經點</button>
         </div>
+        <div class="btn-row">
+          <button type="button" class="secondary-btn big" id="place-fav">☆ 收藏</button>
+          <button type="button" class="secondary-btn big" id="place-share">分享位置</button>
+        </div>
       </div>
 
       <!-- 路線 -->
       <div id="view-route" class="view hidden">
         <div class="route-head">
-          <h2>駕車路線</h2>
+          <h2 id="route-title">路線規劃</h2>
           <button type="button" id="route-close" class="icon-btn" aria-label="關閉路線">✕</button>
+        </div>
+        <div class="mode-tabs" id="mode-tabs" role="tablist" aria-label="交通方式">
+          <button type="button" role="tab" data-mode="driving">🚗<span>駕車</span></button>
+          <button type="button" role="tab" data-mode="transit">🚌<span>公交火車</span></button>
+          <button type="button" role="tab" data-mode="walking">🚶<span>步行</span></button>
+          <button type="button" role="tab" data-mode="bicycling">🚴<span>騎行</span></button>
+          <button type="button" role="tab" data-mode="electrobike">🛵<span>電動車</span></button>
         </div>
         <div class="stops" id="stops"></div>
         <div class="stop-actions">
@@ -96,11 +129,90 @@
         </div>
         <p id="nav-note" class="muted small hidden"></p>
       </div>
+
+      <!-- 附近搜尋結果 -->
+      <div id="view-nearby" class="view hidden">
+        <div class="route-head">
+          <h2 id="nearby-title">附近</h2>
+          <button type="button" id="nearby-close" class="icon-btn" aria-label="關閉">✕</button>
+        </div>
+        <div class="btn-row"><button type="button" id="nearby-here" class="link-btn">在地圖中心重新搜尋</button></div>
+        <div id="nearby-status" class="status" role="status" aria-live="polite"></div>
+        <ul id="nearby-list" class="results"></ul>
+      </div>
+
+      <!-- 收藏 -->
+      <div id="view-favs" class="view hidden">
+        <div class="route-head">
+          <h2>我的收藏</h2>
+          <button type="button" id="favs-close" class="icon-btn" aria-label="關閉">✕</button>
+        </div>
+        <div class="account-row">
+          <span id="account-status" class="muted small">未登入：收藏只存在這台裝置</span>
+          <button type="button" id="btn-account" class="link-btn">登入同步</button>
+        </div>
+        <div class="btn-row">
+          <button type="button" class="secondary-btn big" id="fav-export">匯出 JSON</button>
+          <button type="button" class="secondary-btn big" id="fav-import">匯入 JSON</button>
+          <input type="file" id="fav-import-file" accept="application/json,.json" class="hidden" />
+        </div>
+        <div id="favs-status" class="status" role="status" aria-live="polite"></div>
+        <ul id="fav-list" class="results"></ul>
+      </div>
+
+      <!-- 信箱登入 -->
+      <div id="view-account" class="view hidden">
+        <div class="route-head">
+          <h2>信箱登入</h2>
+          <button type="button" id="account-close" class="icon-btn" aria-label="關閉">✕</button>
+        </div>
+        <p id="account-disabled" class="muted small hidden">信箱登入尚未啟用（網站管理者還沒有設定寄信服務）。收藏目前只存在這台裝置，可用「匯出 JSON」備份。</p>
+        <form id="login-form" class="login-form" autocomplete="on">
+          <p class="muted small">輸入信箱，我們會寄一組 6 位數驗證碼給你（10 分鐘內有效）。登入後收藏會在你的各裝置之間同步。</p>
+          <input id="login-email" type="email" inputmode="email" autocomplete="email" placeholder="你的信箱" maxlength="254" required aria-label="信箱" />
+          <button type="submit" class="primary-btn big" id="login-send">寄送驗證碼</button>
+        </form>
+        <form id="code-form" class="login-form hidden" autocomplete="one-time-code">
+          <p class="muted small" id="code-hint"></p>
+          <input id="login-code" type="text" inputmode="numeric" autocomplete="one-time-code" pattern="\d{6}" maxlength="6" placeholder="6 位數驗證碼" required aria-label="驗證碼" />
+          <button type="submit" class="primary-btn big" id="code-verify">登入</button>
+          <button type="button" class="link-btn" id="code-back">換一個信箱／重新寄送</button>
+        </form>
+        <div id="account-in" class="hidden">
+          <p>已登入：<b id="account-email"></b></p>
+          <div class="btn-row">
+            <button type="button" class="secondary-btn big" id="btn-sync">立即同步</button>
+            <button type="button" class="secondary-btn big" id="btn-logout">登出</button>
+          </div>
+        </div>
+        <div id="account-status2" class="status" role="status" aria-live="polite"></div>
+      </div>
+
     </section>
+
+    <!-- 分享位置 -->
+    <div id="share-modal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="share-title">
+      <div class="modal-card">
+        <div class="route-head">
+          <h2 id="share-title">分享位置</h2>
+          <button type="button" id="share-close" class="icon-btn" aria-label="關閉">✕</button>
+        </div>
+        <p id="share-name" class="muted"></p>
+        <input id="share-link" type="text" readonly aria-label="分享連結" />
+        <div class="btn-row wrap">
+          <button type="button" class="primary-btn big" id="share-native">分享…</button>
+          <a class="secondary-btn big" id="share-sms" href="#">簡訊</a>
+          <button type="button" class="secondary-btn big" id="share-copy">複製連結</button>
+        </div>
+        <p class="muted small">「分享…」可選微信、QQ、iMessage、備忘錄等。對方點開連結會在高德地圖看到這個位置（不用安裝 App）。</p>
+        <button type="button" class="link-btn hidden" id="share-clear">移除地圖上的標記</button>
+      </div>
+    </div>
 
     <div id="toast" class="toast" role="alert" aria-live="assertive"></div>
 
     <script src="/vendor/leaflet/leaflet.js"></script>
+    <script src="/vendor/markercluster/leaflet.markercluster.js"></script>
     <script type="module" src="/js/app.js"></script>
   </body>
 </html>

@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="zh-Hant">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+    <meta name="theme-color" content="#ffffff" />
+    <title>3D 地圖 · World Map</title>
+    <link rel="stylesheet" href="/css/app.css" />
+    <style>
+      html, body { height: 100%; margin: 0; }
+      #map3d { position: fixed; inset: 0; }
+      .bar { position: fixed; z-index: 10; top: calc(12px + var(--safe-top)); left: calc(12px + var(--safe-left)); display: flex; gap: 8px; }
+      .msg { position: fixed; z-index: 10; left: 16px; right: 16px; top: 50%; transform: translateY(-50%); background: var(--bg); border-radius: 16px; padding: 18px; box-shadow: var(--shadow); text-align: center; }
+      .msg.hidden { display: none; }
+    </style>
+  </head>
+  <body>
+    <div id="map3d" aria-label="3D 地圖"></div>
+    <div class="bar">
+      <a class="secondary-btn big" href="/" id="back" style="text-decoration:none;background:#fff">← 返回平面地圖</a>
+      <button class="secondary-btn big" id="locate3d" type="button" style="background:#fff">定位</button>
+    </div>
+    <div id="msg" class="msg hidden" role="status"></div>
+    <script type="module" src="/js/3d.js"></script>
+  </body>
+</html>

@@ -5,14 +5,45 @@
 //  - 高德 Key 只從 env.AMAP_KEY 讀取，只在伺服器端加入請求，絕不出現在回應或日誌中。
 //  - 只轉送到固定的 https://restapi.amap.com 路徑，參數全部經過白名單驗證。
 
-import { ValidationError, validateSearch, validateGeocode, validateRoute, ROUTE_STRATEGIES } from './validate.js';
+import {
+  ValidationError,
+  validateSearch,
+  validateGeocode,
+  validateRoute,
+  validateNearby,
+  ROUTE_STRATEGIES,
+  TRANSIT_STRATEGIES,
+  NEARBY_TYPES,
+} from './validate.js';
 import { clientIp } from './ratelimit.js';
-import { mapSearchResponse, mapGeocodeResponse, mapRouteResponse } from './mapping.js';
+import {
+  mapSearchResponse,
+  mapGeocodeResponse,
+  mapRouteResponse,
+  mapPathRouteResponse,
+  mapTransitResponse,
+} from './mapping.js';
+import { HttpError, json, errorResponse } from './http.js';
+import { createRailMatcher } from './rail.js';
+import railData from './rail-data.js';
+import { requestCode, verifyCode, logout, me, assertSameOrigin } from './auth.js';
+import { getFavorites, syncFavorites } from './favorites.js';
+import { getConfig, amapServiceProxy } from './config.js';
 
 const AMAP_BASE = 'https://restapi.amap.com';
 const UPSTREAM_TIMEOUT_MS = 10000;
 
-const UPSTREAM_PATHS = new Set(['/v5/place/around', '/v5/place/text', '/v3/geocode/geo', '/v5/direction/driving']);
+const UPSTREAM_PATHS = new Set([
+  '/v5/place/around',
+  '/v5/place/text',
+  '/v3/geocode/geo',
+  '/v3/geocode/regeo',
+  '/v5/direction/driving',
+  '/v5/direction/walking',
+  '/v5/direction/bicycling',
+  '/v5/direction/electrobike',
+  '/v5/direction/transit/integrated',
+]);
 
 export class UpstreamError extends Error {
   constructor(status, code, message, infocode) {
@@ -22,23 +53,6 @@ export class UpstreamError extends Error {
     this.code = code;
     this.infocode = infocode;
   }
-}
-
-function json(body, status = 200, extraHeaders = {}) {
-  return new Response(JSON.stringify(body), {
-    status,
-    headers: {
-      'content-type': 'application/json; charset=utf-8',
-      'cache-control': status === 200 ? 'private, max-age=60' : 'no-store',
-      'x-content-type-options': 'nosniff',
-      ...extraHeaders,
-    },
-  });
-}
-
-function errorResponse(status, code, message, field, infocode) {
-  // infocode 是高德公開的錯誤代碼（例如 10009），方便排查；不含任何金鑰或網址
-  return json({ error: { code, message, ...(field ? { field } : {}), ...(infocode ? { infocode } : {}) } }, status);
 }
 
 /** 高德 infocode → 對使用者友善的錯誤（不洩漏任何內部細節） */
@@ -131,29 +145,121 @@ export async function handleGeocode(params, env, fetchImpl) {
   }
 }
 
+let railMatcher;
+function getRailMatcher() {
+  return (railMatcher ??= createRailMatcher(railData));
+}
+
+/** 起點／終點沒帶城市代碼時，用逆地理編碼查（公交規劃必須有城市） */
+async function cityOf(location, env, fetchImpl) {
+  const body = await callAmap('/v3/geocode/regeo', { location }, env, fetchImpl);
+  const ac = body?.regeocode?.addressComponent;
+  const pick = (v) => (Array.isArray(v) ? '' : String(v ?? ''));
+  const code = pick(ac?.citycode) || pick(ac?.adcode);
+  if (!code) throw new UpstreamError(422, 'no_route', '起點或終點不在可規劃的區域內');
+  return code;
+}
+
+/** 在每個火車段加上「推測線路」，並組出整條路線的折線 */
+export function attachRailLines(route, matcher = getRailMatcher()) {
+  const all = [];
+  for (const seg of route.segments) {
+    if (seg.type === 'train') {
+      const stops = seg.stops.filter((s) => s.lng != null);
+      const m = matcher.matchRoute(stops, seg.trip);
+      seg.lineMatch = m; // { estimated: true, unmatched, sections:[{line,ref,from,to,stopCount,lineStations,path}] }
+      seg.polyline = m.sections.flatMap((x) => x.path);
+    } else if (seg.type === 'bus' || seg.type === 'subway') {
+      if (!seg.polyline.length) seg.polyline = [seg.from, ...seg.viaStops, seg.to].filter((p) => p.lng != null).map((p) => [p.lng, p.lat]);
+    }
+    all.push(...seg.polyline);
+  }
+  route.polyline = all;
+  return route;
+}
+
 export async function handleRoute(params, env, fetchImpl) {
   const v = validateRoute(params);
+  if (v.mode === 'driving') {
+    const body = await callAmap(
+      '/v5/direction/driving',
+      {
+        origin: v.origin,
+        destination: v.destination,
+        waypoints: v.waypoints.length ? v.waypoints.join(';') : undefined,
+        strategy: ROUTE_STRATEGIES[v.strategy],
+        origin_id: v.originId,
+        destination_id: v.destinationId,
+        show_fields: 'cost,polyline',
+      },
+      env,
+      fetchImpl,
+    );
+    return { mode: 'driving', ...mapRouteResponse(body, v.strategy) };
+  }
+  if (v.mode === 'transit') {
+    const [city1, city2] = await Promise.all([
+      v.city1 ?? cityOf(v.origin, env, fetchImpl),
+      v.city2 ?? cityOf(v.destination, env, fetchImpl),
+    ]);
+    const body = await callAmap(
+      '/v5/direction/transit/integrated',
+      {
+        origin: v.origin,
+        destination: v.destination,
+        city1,
+        city2,
+        strategy: TRANSIT_STRATEGIES[v.strategy],
+        AlternativeRoute: 4,
+        extensions: 'all',
+        show_fields: 'cost,polyline',
+      },
+      env,
+      fetchImpl,
+    );
+    const out = mapTransitResponse(body);
+    out.routes.forEach((r) => attachRailLines(r));
+    return out;
+  }
+  // walking / bicycling / electrobike
   const body = await callAmap(
-    '/v5/direction/driving',
-    {
-      origin: v.origin,
-      destination: v.destination,
-      waypoints: v.waypoints.length ? v.waypoints.join(';') : undefined,
-      strategy: ROUTE_STRATEGIES[v.strategy],
-      origin_id: v.originId,
-      destination_id: v.destinationId,
-      show_fields: 'cost,polyline',
-    },
+    `/v5/direction/${v.mode}`,
+    { origin: v.origin, destination: v.destination, alternative_route: v.mode === 'walking' ? undefined : 1, show_fields: 'cost,polyline' },
     env,
     fetchImpl,
   );
-  return mapRouteResponse(body, v.strategy);
+  return mapPathRouteResponse(body, v.mode);
 }
 
+export async function handleNearby(params, env, fetchImpl) {
+  const v = validateNearby(params);
+  const body = await callAmap(
+    '/v5/place/around',
+    { location: v.location, types: NEARBY_TYPES[v.kind], radius: v.radius, page_size: v.limit, sortrule: 'distance', show_fields: 'business' },
+    env,
+    fetchImpl,
+  );
+  const out = mapSearchResponse(body, 'around');
+  return { kind: v.kind, radius: v.radius, ...out, results: out.results.map((r) => ({ ...r, nearbyKind: v.kind })) };
+}
+
+// ───────────────────────────── 路由表 ─────────────────────────────
+// data：回傳資料物件，由此處包成 JSON（可快取）；raw：自行回傳 Response；mutating：需通過同源檢查。
+const data = (fn) => ({ fn: (ctx) => fn(ctx.params, ctx.env, ctx.fetchImpl), kind: 'data' });
+const raw = (fn, mutating = false) => ({ fn, kind: 'raw', mutating });
+
 const ROUTES = {
-  '/api/search': handleSearch,
-  '/api/geocode': handleGeocode,
-  '/api/route': handleRoute,
+  '/api/search': { GET: data(handleSearch) },
+  '/api/geocode': { GET: data(handleGeocode) },
+  '/api/route': { GET: data(handleRoute) },
+  '/api/nearby': { GET: data(handleNearby) },
+  '/api/config': { GET: raw(getConfig) },
+  '/api/auth/request-code': { POST: raw(requestCode, true) },
+  '/api/auth/verify': { POST: raw(verifyCode, true) },
+  '/api/auth/logout': { POST: raw(logout, true) },
+  '/api/auth/me': { GET: raw(me) },
+  '/api/favorites': { GET: raw(getFavorites) },
+  '/api/favorites/sync': { POST: raw(syncFavorites, true) },
 };
 
 function originAllowed(request, env) {
@@ -174,17 +280,29 @@ function originAllowed(request, env) {
 }
 
 /**
- * 主入口：處理 /api/* 請求。非 /api 路徑回傳 null（交給靜態檔案處理）。
+ * 主入口：處理 /api/* 與 /_AMapService/* 請求。其他路徑回傳 null（交給靜態檔案處理）。
  * @param {Request} request
- * @param {{AMAP_KEY?: string, ALLOWED_ORIGINS?: string}} env
+ * @param {object} env  AMAP_KEY, ALLOWED_ORIGINS, WM_KV, MAIL_*, TIANDITU_TK, AMAP_JS_KEY, AMAP_JS_SECURITY_CODE …
  * @param {{fetchImpl?: typeof fetch, rateLimiter?: {take(key:string):{ok:boolean,retryAfter:number}}, remoteAddress?: string}} [opts]
  */
 export async function handleApiRequest(request, env, opts = {}) {
   const url = new URL(request.url);
-  if (!url.pathname.startsWith('/api/')) return null;
-  const handler = ROUTES[url.pathname.replace(/\/+$/, '')];
-  if (!handler) return errorResponse(404, 'not_found', '找不到此 API');
-  if (request.method !== 'GET') return errorResponse(405, 'method_not_allowed', '只支援 GET');
+  const isProxy = url.pathname.startsWith('/_AMapService/');
+  if (!isProxy && !url.pathname.startsWith('/api/')) return null;
+  const path = url.pathname.replace(/\/+$/, '');
+  let route;
+  if (isProxy) {
+    route = raw(amapServiceProxy);
+  } else {
+    const methods = ROUTES[path];
+    if (!methods) return errorResponse(404, 'not_found', '找不到此 API');
+    route = methods[request.method];
+    if (!route) {
+      const res = errorResponse(405, 'method_not_allowed', `只支援 ${Object.keys(methods).join('、')}`);
+      res.headers.set('allow', Object.keys(methods).join(', '));
+      return res;
+    }
+  }
   if (!originAllowed(request, env)) return errorResponse(403, 'forbidden_origin', '不允許的來源');
   if (opts.rateLimiter) {
     const r = opts.rateLimiter.take(clientIp(request, opts.remoteAddress));
@@ -195,10 +313,17 @@ export async function handleApiRequest(request, env, opts = {}) {
     }
   }
   try {
-    const data = await handler(url.searchParams, env, opts.fetchImpl ?? fetch);
-    return json(data);
+    if (route.mutating) assertSameOrigin(request, env);
+    const ctx = { request, url, params: url.searchParams, env, fetchImpl: opts.fetchImpl ?? fetch, remoteAddress: opts.remoteAddress };
+    const out = await route.fn(ctx);
+    return route.kind === 'data' ? json(out) : out;
   } catch (err) {
     if (err instanceof ValidationError) return errorResponse(400, 'invalid_param', err.message, err.field);
+    if (err instanceof HttpError) {
+      const res = errorResponse(err.status, err.code, err.message);
+      if (err.extra?.retryAfter) res.headers.set('retry-after', String(err.extra.retryAfter));
+      return res;
+    }
     if (err instanceof UpstreamError) return errorResponse(err.status, err.code, err.message, undefined, /^\d{5}$/.test(err.infocode ?? '') ? err.infocode : undefined);
     // 未預期的錯誤：只記錄錯誤類型，不記錄 URL（URL 內含 key）
     console.error('[api] unexpected error:', err?.name || 'Error');

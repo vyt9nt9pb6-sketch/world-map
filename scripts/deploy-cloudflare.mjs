@@ -30,14 +30,19 @@ if (key && code.includes(key)) {
   process.exit(1);
 }
 
+// KV 命名空間（收藏／登入用）。先建立：見 README「Cloudflare 部署」。
+//   CF_KV_NAMESPACE_ID=<id> node scripts/deploy-cloudflare.mjs
+const KV_ID = process.env.CF_KV_NAMESPACE_ID;
 const metadata = {
   main_module: 'worker.js',
   compatibility_date: COMPAT,
   bindings: [
     // 每個 IP 每 60 秒最多 60 次 /api 請求（Cloudflare Rate Limiting 綁定）
     { type: 'ratelimit', name: 'API_RATE_LIMIT', namespace_id: '1001', simple: { limit: 60, period: 60 } },
+    ...(KV_ID ? [{ type: 'kv_namespace', name: 'WM_KV', namespace_id: KV_ID }] : []),
   ],
-  keep_bindings: ['secret_text'], // 重新部署時保留 AMAP_KEY 秘密
+  // 重新部署時保留所有「秘密」（AMAP_KEY、TIANDITU_TK、AMAP_JS_*、BREVO_API_KEY…）與純文字變數，絕不覆蓋
+  keep_bindings: ['secret_text', 'plain_text'],
   observability: { enabled: false },
 };
 
@@ -58,6 +63,7 @@ const deployJs = `async () => {
   return { deployed: r.success, etag: r.result?.etag, bindings: (r.result?.bindings || []).map(x => x.name + ':' + x.type), subdomainEnabled: sub.success, subErr: sub.error };
 }`;
 await writeFile(join(RUN, 'cf-deploy.js'), deployJs, { mode: 0o600 });
+console.log(KV_ID ? '✔ 含 KV 綁定 WM_KV' : '⚠ 未設 CF_KV_NAMESPACE_ID：收藏／登入功能不會啟用');
 console.log(`✔ .run/cf-deploy.js（${(deployJs.length / 1024).toFixed(0)} KB，不含金鑰）`);
 
 if (process.argv.includes('--secret')) {

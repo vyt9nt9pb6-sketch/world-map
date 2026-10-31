@@ -11,8 +11,10 @@ if (!key || key.length < 16) {
   process.exit(2);
 }
 const hits = [];
+// 同時比對其他伺服器端機密（只在環境變數有設定時才檢查；絕不印出值）
+const secrets = [key, ...['AMAP_JS_SECURITY_CODE', 'BREVO_API_KEY', 'RESEND_API_KEY', 'AUTH_SECRET'].map((n) => process.env[n]).filter((v) => v && v.length >= 12)];
 const scan = (label, buf) => {
-  if (buf.includes(key)) hits.push(label);
+  if (secrets.some((k) => buf.includes(k))) hits.push(label);
 };
 
 // 1) public/（前端會送到瀏覽器的所有檔案）

@@ -10,8 +10,13 @@ function isUsablePoint(p) {
   return p && Number.isFinite(p.lng) && Number.isFinite(p.lat);
 }
 
+// 路線模式 → 各導航 App 的參數
+const IOS_T = { driving: '0', transit: '1', walking: '2', bicycling: '3', electrobike: '3' };
+const WEB_MODE = { driving: 'car', transit: 'bus', walking: 'walk', bicycling: 'ride', electrobike: 'ride' };
+const APPLE_FLAG = { driving: 'd', transit: 'r', walking: 'w', bicycling: 'w', electrobike: 'd' };
+
 /** 高德地圖 iOS App：iosamap://path（dev=0 表示座標已是 GCJ-02，不再加密）。 */
-export function amapIosUri({ start, dest, via = [] }) {
+export function amapIosUri({ start, dest, via = [], mode = 'driving' }) {
   if (!isUsablePoint(dest)) throw new Error('destination required');
   const q = new URLSearchParams();
   q.set('sourceApplication', 'WorldMap');
@@ -33,7 +38,7 @@ export function amapIosUri({ start, dest, via = [] }) {
     q.set('vianames', vias.map((p, i) => (p.name || `途經點${i + 1}`).replace(/\|/g, ' ')).join('|'));
   }
   q.set('dev', '0');
-  q.set('t', '0');
+  q.set('t', IOS_T[mode] ?? '0');
   return `iosamap://path?${q.toString()}`;
 }
 
@@ -46,16 +51,16 @@ export function amapAndroidUri(args) {
 const WEB_POLICY = { recommend: '0', fastest: '0', avoid_tolls: '2', highway: '0', no_highway: '3' };
 
 /** 高德網頁版導航（桌機或沒裝 App 時使用；手機上 callnative=1 會嘗試喚起 App）。 */
-export function amapWebUrl({ start, dest, via = [], strategy = 'recommend' }) {
+export function amapWebUrl({ start, dest, via = [], strategy = 'recommend', mode = 'driving' }) {
   if (!isUsablePoint(dest)) throw new Error('destination required');
   const pt = (p, fallback) => `${fmt(p.lng)},${fmt(p.lat)},${(p.name || fallback).replace(/,/g, ' ')}`;
   const q = new URLSearchParams();
   if (isUsablePoint(start) && !start.isCurrentLocation) q.set('from', pt(start, '起點'));
   q.set('to', pt(dest, '終點'));
-  const v = via.filter(isUsablePoint);
+  const v = mode === 'driving' ? via.filter(isUsablePoint) : [];
   if (v.length) q.set('via', pt(v[0], '途經點')); // 網頁版只支援 1 個途經點
-  q.set('mode', 'car');
-  q.set('policy', WEB_POLICY[strategy] ?? '0');
+  q.set('mode', WEB_MODE[mode] ?? 'car');
+  if (mode === 'driving') q.set('policy', WEB_POLICY[strategy] ?? '0');
   q.set('coordinate', 'gaode');
   q.set('src', 'WorldMap');
   q.set('callnative', '1');
@@ -68,12 +73,12 @@ export function amapWebUrl({ start, dest, via = [], strategy = 'recommend' }) {
  * 起點是「我的位置」時省略 saddr，Apple 地圖會自動用目前位置。
  * Apple 地圖網址不支援途經點，途經點會被忽略（UI 會提示）。
  */
-export function appleMapsUrl({ start, dest }) {
+export function appleMapsUrl({ start, dest, mode = 'driving' }) {
   if (!isUsablePoint(dest)) throw new Error('destination required');
   const q = new URLSearchParams();
   if (isUsablePoint(start) && !start.isCurrentLocation) q.set('saddr', `${fmt(start.lat)},${fmt(start.lng)}`);
   q.set('daddr', `${fmt(dest.lat)},${fmt(dest.lng)}`);
-  q.set('dirflg', 'd');
+  q.set('dirflg', APPLE_FLAG[mode] ?? 'd');
   return `https://maps.apple.com/?${q.toString()}`;
 }
 

@@ -17,7 +17,7 @@ function tooMany() {
 export default {
   async fetch(request, env) {
     const url = new URL(request.url);
-    if (url.pathname.startsWith('/api/') && env.API_RATE_LIMIT?.limit) {
+    if ((url.pathname.startsWith('/api/') || url.pathname.startsWith('/_AMapService/')) && env.API_RATE_LIMIT?.limit) {
       try {
         const { success } = await env.API_RATE_LIMIT.limit({ key: clientIp(request) });
         if (!success) return tooMany();

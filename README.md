@@ -1,4 +1,4 @@
-# World Map v1
+# World Map v2
 
 **線上版（固定網址）：https://world-map.kwok-worldmap.workers.dev**
 
@@ -16,6 +16,57 @@
 | 導航 | 「高德地圖導航」：iPhone 先開高德 App（`iosamap://path`），沒裝 App 就改開高德網頁版（`uri.amap.com/navigation`）。「Apple 地圖」：開 `maps.apple.com` 駕車導航。 |
 
 介面文字是繁體中文；地名、道路名照高德回傳的原樣顯示（多為簡體）。
+
+## v2 新功能
+
+| 功能 | 說明 |
+|---|---|
+| 多種導航方式 | 駕車／**公交＋火車**（`/v5/direction/transit/integrated`）／步行／騎行／電動車。起點預設「我的位置」。跨城市的城市碼由後端用逆地理編碼自動取得。 |
+| 火車詳情 | 每個火車段列出**所有停靠站**（高德 `via_stops`，含到發時刻與停留分鐘）、不停靠的沿線站、座位價格。**鐵路線名稱**（陇海線、连镇线、京沪高铁、沪宁城际線…）由 OSM 衍生的靜態資料集比對得出，**一律標示「推測線路」**，因為高德本身不回傳線路名稱，偶爾會與實際不同。 |
+| 搜尋附近 | 廁所（200300）、加油站（010100）、充電站（011100），用 `/v5/place/around`，地圖上以 markercluster 聚合，清單依距離排序，可「在地圖中心重新搜尋」。 |
+| 收藏 | 本機儲存（localStorage，並呼叫 `navigator.storage.persist()`），可匯出／匯入 JSON；若啟用寄信，可用**電子郵件驗證碼登入**，收藏存在 Workers KV，跨裝置同步（以每筆 `updatedAt` 合併，刪除以墓碑記錄 30 天）。 |
+| 分享／標記我的位置 | 「標記我的位置」釘選目前位置；分享按鈕用 Web Share API，備援為簡訊（iOS `sms:&body=`、Android `sms:?body=`）與複製連結。連結為 `https://uri.amap.com/marker?position=經度,緯度&name=…`（GCJ-02，在微信／QQ／簡訊／iMessage 都能點開）。 |
+| 衛星＋天地圖 | 保留高德衛星圖，新增**天地圖影像**（`img_w`，EPSG:3857；天地圖是 WGS-84，前端逐磚計算 GCJ/WGS 位移並重繪）。沒有 tk 時選項自動停用。 |
+| 3D | 切換到 `/3d.html`，用高德 JS API 2.0（`viewMode:'3D'`、俯仰角、建築物）。沒有 JS Key 時選項自動停用。 |
+
+### 需要使用者自己申請的項目（沒設定時對應功能會優雅停用）
+全部設為 Cloudflare Worker 的 **Secret**（Settings → Variables and Secrets），設定後不必重新部署。
+
+| 名稱 | 用途 | 申請與設定 |
+|---|---|---|
+| `TIANDITU_TK` | 天地圖影像圖層 | 到 https://console.tianditu.gov.cn 註冊並實名認證 → 應用管理 → 創建應用，類型選「瀏覽器端」→ 白名單填 `kwok-worldmap.workers.dev`。個人配額每天 1 萬次。這是瀏覽器金鑰，前端會看得到，保護靠白名單。服務條款禁止大量抓取、快取與鏡像，所以**不經代理、不快取**，圖磚由瀏覽器直連天地圖。 |
+| `AMAP_JS_KEY`、`AMAP_JS_SECURITY_CODE` | 3D 模式 | 高德開放平台 → 應用管理 → 建立「Web端（JS API）」的 Key，取得**安全密鑰**；Key 的域名白名單填 `kwok-worldmap.workers.dev`。安全密鑰只放在伺服器，由 `/_AMapService/*` 代理在伺服器端附上 `jscode`；前端只拿到 Key。 |
+| 寄信（見下） | 電子郵件登入 | 見下表。 |
+
+### 寄信（驗證碼登入）
+`core/mail.js` 是可抽換的寄件器，用環境變數 `MAIL_PROVIDER` 選擇：`brevo`、`resend`、`cloudflare`。沒有設定時，`/api/auth/request-code` 回 503，介面顯示「尚未啟用電子郵件登入」，其餘功能（含本機收藏）不受影響。
+
+| 方案 | 需要 | 備註 |
+|---|---|---|
+| Brevo（唯一不需網域的方案） | 註冊 Brevo 帳號、建立 API Key、驗證一個寄件信箱 | 免費每天 300 封。共用寄件網域，QQ／163 可能進垃圾信。設 `MAIL_PROVIDER=brevo`、`BREVO_API_KEY`、`MAIL_FROM`（已驗證信箱）。 |
+| Resend | 自己的網域（DNS 驗證） | 免費每月 3,000 封、每天 100 封。設 `MAIL_PROVIDER=resend`、`RESEND_API_KEY`、`MAIL_FROM`。 |
+| Cloudflare Email Service | 網域＋Workers Paid（寄給任意收件人） | 綁定 `EMAIL`，設 `MAIL_PROVIDER=cloudflare`、`MAIL_FROM`。 |
+
+其他設定：`MAIL_FROM_NAME`、`MAIL_DAILY_LIMIT`（全站每日寄信上限，預設 200）、`AUTH_SECRET`（選填；未設定時自動產生並存入 KV）。
+
+安全設計：6 位數驗證碼以 HMAC 雜湊儲存、10 分鐘過期、最多試 5 次；同一信箱 60 秒冷卻與每小時 5 次、每個 IP 每小時 10 次、全站每日上限；登入後發 32 位元組隨機 session token（KV 只存 SHA-256），以 HttpOnly、SameSite=Lax cookie 傳送（30 天）；寫入類路由檢查 Origin／Referer 同源；POST 內容上限 4096 位元組。KV 計數器不是原子操作，限流是盡力而為。
+
+### Cloudflare 部署（v2）
+```bash
+# 一次性：建立 KV（收藏／登入用）
+#   Cloudflare 後台 → Storage & Databases → KV → Create，或 API：POST /accounts/{id}/storage/kv/namespaces
+CF_KV_NAMESPACE_ID=<KV id> node scripts/deploy-cloudflare.mjs    # 產生 .run/cf-deploy.js（含 WM_KV 綁定）
+# 由 Grok Bot 的 Cloudflare 連接器執行 .run/cf-deploy.js
+```
+部署中繼資料使用 `keep_bindings: ['secret_text','plain_text']`，**不會覆蓋已存在的秘密（AMAP_KEY 等）**。部署後請確認綁定名稱仍在，並用 `npm run check:api -- https://world-map.kwok-worldmap.workers.dev` 驗證。
+Vercel 部署不支援登入與收藏同步（沒有 KV 綁定），其他功能可用。
+
+### 資料與授權
+- **Leaflet.markercluster 1.5.3**（MIT）放在 `public/vendor/markercluster/`。
+- **鐵路線資料集** `data/rail-lines.json` 來自 **OpenStreetMap**（© OpenStreetMap contributors，**ODbL 1.0**），由 `scripts/build-rail-lines.mjs` 透過 Overpass API 產生；App 內地圖與火車詳情會顯示著作權標示與授權連結。這是衍生資料庫，若再散布須以 ODbL 釋出。
+- **OpenRailwayMap 為 GPL-3.0，本專案沒有複製其程式碼**；只使用 OSM 原始資料與自己撰寫的比對程式（`core/rail.js`）。
+- 站序修正（`scripts/lib/rail-order.mjs`）：OSM 站點成員順序有時不沿線，以重新插入＋2-opt 修正，仍可能有少數誤差。
+- 高德圖磚網址為公開網頁圖磚，非正式授權 API；天地圖依其服務條款僅限瀏覽器端直連。
 
 ## 架構
 
@@ -141,4 +192,4 @@ npm run screenshots        # 無頭 Chrome 截圖（iPhone 390×844@3x、桌機 
 - iPhone 上「沒裝高德 App 就改開網頁」是用 1.6 秒計時判斷，少數情況 Safari 會先跳出「無法開啟網址」提示。
 - 高德 Web 服務個人開發者每日配額有限，超過時介面會顯示「今天的查詢次數已達上限」。
 - 圖磚直接從高德伺服器載入（不經過我們的伺服器），屬於高德網頁地圖的公開圖磚，非正式授權的 API；高德若改網址需更新 `public/js/lib/layers.js`。
-- 尚未包含：中石化加油站、服務區、天氣、油費估算、收藏。程式已預留：後端在 `core/handlers.js` 的 `ROUTES` 加新端點，前端在 `public/js/lib/api.js` 加函式、`app.js` 加新的面板即可。
+- 尚未包含：離線地圖／離線導航（本版刻意不做）、天氣、油費估算。程式已預留：後端在 `core/handlers.js` 的 `ROUTES` 加新端點，前端在 `public/js/lib/api.js` 加函式、`app.js` 加新的面板即可。

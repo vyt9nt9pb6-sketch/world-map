@@ -27,18 +27,53 @@ async function get(path, params, { signal } = {}) {
   return body;
 }
 
+async function send(method, path, body) {
+  let res;
+  try {
+    res = await fetch(path, {
+      method,
+      credentials: 'same-origin',
+      headers: { accept: 'application/json', ...(body ? { 'content-type': 'application/json' } : {}) },
+      body: body ? JSON.stringify(body) : undefined,
+    });
+  } catch {
+    throw new ApiError('網路連線失敗，請檢查網路', 0, 'network');
+  }
+  let json = null;
+  try {
+    json = await res.json();
+  } catch {
+    /* ignore */
+  }
+  if (!res.ok) {
+    const e = new ApiError(json?.error?.message || `伺服器錯誤（${res.status}）`, res.status, json?.error?.code);
+    e.retryAfter = Number(res.headers.get('retry-after')) || 0;
+    throw e;
+  }
+  return json;
+}
+
 const ll = (p) => `${p.lng.toFixed(6)},${p.lat.toFixed(6)}`;
 
 export const api = {
   search: (q, center, opts) => get('/api/search', { q, location: center ? ll(center) : undefined }, opts),
   geocode: (address, opts) => get('/api/geocode', { address }, opts),
-  route: ({ start, dest, via = [], strategy }, opts) =>
+  config: (opts) => get('/api/config', {}, opts),
+  nearby: ({ kind, center, radius }, opts) => get('/api/nearby', { kind, location: ll(center), radius }, opts),
+  authMe: () => get('/api/auth/me', {}),
+  requestCode: (email) => send('POST', '/api/auth/request-code', { email }),
+  verifyCode: (email, code) => send('POST', '/api/auth/verify', { email, code }),
+  logout: () => send('POST', '/api/auth/logout', {}),
+  favorites: () => get('/api/favorites', {}),
+  syncFavorites: (items) => send('POST', '/api/favorites/sync', { items }),
+  route: ({ start, dest, via = [], strategy, mode = 'driving' }, opts) =>
     get(
       '/api/route',
       {
         origin: ll(start),
         destination: ll(dest),
         waypoints: via.length ? via.map(ll).join(';') : undefined,
+        mode,
         strategy,
         origin_id: start.poiId,
         destination_id: dest.poiId,
