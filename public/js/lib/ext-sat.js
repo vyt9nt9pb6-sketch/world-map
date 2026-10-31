@@ -39,3 +39,21 @@ export function createGoogleSatFlexible(AMap, { key, getSession, zIndex = 3 }) {
     dataZooms: [1, 19],
   });
 }
+
+/**
+ * Google 地形（mapType=terrain + layerRoadmap：地形暈渲＋道路＋地名）。
+ * 不做 GCJ 平移：Google 在中國的道路／地名向量本身就是 GCJ-02（與高德同一座標系），
+ * 地形暈渲的幾百公尺偏移肉眼看不出來；平移反而會讓 Google 的道路和高德的路線／標記錯開。
+ * 這個假設需要在大陸實機確認（見 README「已知風險」）。
+ */
+export function createGoogleTerrainFlexible(AMap, { key, getSession, zIndex = 3 }) {
+  return createShiftedFlexible(AMap, {
+    urlFor: (z, x, y) => {
+      const s = typeof getSession === 'function' ? getSession() : getSession;
+      return googleSatUrl(key, typeof s === 'string' ? s : '', z, x, y);
+    },
+    zIndex,
+    dataZooms: [1, 18],
+    shift: false,
+  });
+}

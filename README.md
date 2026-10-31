@@ -1,9 +1,55 @@
-# World Map v3
+# World Map v4
 
 **線上版（固定網址）：https://world-map.kwok-worldmap.workers.dev**
 
 給長途自駕用的網頁地圖：高德高清底圖、搜尋、駕車路線（含過路費）、一鍵交給高德地圖／Apple 地圖導航。
 手機（iPhone Safari）優先，桌機也能用；之後可以包成 App。
+
+## v4（Liquid Glass、圖層網格、地點頁、多路線）
+
+### 變更摘要
+- **圖層選擇器**：2×2 網格（標準／衛星／地形／大眾運輸），縮圖是自繪 SVG（`public/img/layer-*.svg`，無第三方素材）。衛星來源子選項（高德／天地圖／Mapbox／Google）整理在同一張卡片。
+- **地形**：有設定 `GOOGLE_MAPS_TILE_KEY` 且瀏覽器連得到 Google（`reach.js` 探測，2.5 秒逾時、快取 60 秒；大陸需開 VPN）時用 Google Map Tiles API 地形；否則退回天地圖 `ter_w`。
+- **衛星白色 3D 樓塊**：見下方根因，已修並有測試（`tests/v4-map.test.js`）。標準圖層仍保留 3D 樓塊。
+- **搜尋附近**：圖示縮小；搜尋結果旁會主動出現「搜尋附近・跟著地圖更新」；附近結果會隨地圖拖曳／縮放自動更新（600 ms debounce、最短間隔 1.5 秒、中心移動超過半徑 25% 或縮放 ≥0.5 級才重查、40 筆快取、程式移動地圖後 2.2 秒內不查），並有「搜尋此區域」按鈕。
+- **地點頁（仿 Apple 地圖）**：名稱、類別、距離、地址、電話（點擊撥號）、營業時間、評分／人均、照片，按鈕：路線／電話／收藏／分享。資料來自高德 `/v5/place/detail?show_fields=business,photos`（`/api/place`）。
+- **導航**：駕車一次回傳最多 3 條路線（高德 v3 strategy 11：最快／最短距離／避擁堵，再合併 v5 結果），每張卡片有時間、距離、過路費、紅綠燈、直線距離與繞行倍率；地圖上每條路線有標籤，點標籤或卡片即可切換；上方快捷「最快／最短距離／少收費」。選項：現在出發／設定出發時間、避開高速公路、避開收費站（記在 `localStorage: wm.routeopts.v4`）。
+- **Liquid Glass UI**：只用自己的 CSS（`public/css/glass.css`）：背景模糊＋飽和、高光邊緣、浮動膠囊控制、動態染色（衛星圖時調亮藍色）、`linear()` 彈簧動畫（不支援時退回 cubic-bezier）、深色模式。`backdrop-filter` 只用在面板、控制鈕、彈窗、區域按鈕與 toast；內部卡片只用半透明填色，以保 iPhone Safari 效能。
+
+### 衛星白色樓塊的根因
+高德 JS 2.0 的 `showBuildingBlock` **只在建構地圖時生效**。建構子預設值是 `true`，會建立核心的 `AMap.Buildings` 圖層；之後呼叫 `setFeatures`／`setStatus` 在 3D 模式都無法把它移除。v3 是建構後才設定，所以衛星圖上仍有白色擠出樓塊。修法（`public/js/lib/amap-map.js`）：建構時就傳 `showBuildingBlock:false`（衛星／地形），切回標準圖層才重建並開啟。
+
+### 駕車出發時間的限制（誠實說明）
+高德「駕車未來出發時間預測」（`/v4/etd/driving`）只對企業帳號開放，個人 Key 打不到，所以：**駕車**「設定出發時間」只顯示「出發時間＋即時路況耗時」推算的抵達時間，不是預測路況（畫面上有說明，`depart.supported=false`）；**公交／鐵路**則是真正帶 `date`/`time` 查詢。「避開高速公路」仍可能走高架快速路（高德把高架算在一般道路）；「避開收費站」若找不到免費路線會回 `tollNote=no_toll_free`。
+
+### 一步一步：Cloudflare、Google Cloud、Mapbox 設定
+
+**1. Cloudflare（Worker `world-map`）**
+1. 登入 https://dash.cloudflare.com → Workers & Pages → `world-map` → Settings → Variables and Secrets。
+2. 新增 Secret（類型選 Secret，不是 Text）：`AMAP_KEY`（高德 Web 服務 Key）、`AMAP_JS_KEY`、`AMAP_JS_SECURITY_CODE`，以及需要的 `TIANDITU_TK`、`MAPBOX_TOKEN`、`GOOGLE_MAPS_TILE_KEY`。設定後不需要重新部署。
+3. KV：Storage & Databases → KV → Create，建立後在 Worker → Settings → Bindings 綁成 `WM_KV`。
+4. 重新部署時**必須保留綁定**：`CF_KV_NAMESPACE_ID=<KV id> node scripts/deploy-cloudflare.mjs`，再執行產生的 `.run/cf-deploy.js`（`keep_bindings: ['secret_text','plain_text']`，漏了 KV id 會讓 `WM_KV` 被拿掉）。
+
+**2. Google Cloud — Map Tiles API 金鑰（地形用）**
+1. 開 https://console.cloud.google.com ，建立或選一個專案，並綁定帳單帳戶（Map Tiles 需要，有免費額度）。
+2. APIs & Services → Library → 搜尋 **Map Tiles API** → Enable。
+3. APIs & Services → Credentials → Create credentials → API key。
+4. 編輯該 Key：Application restrictions 選 **Websites**，加入 `https://world-map.kwok-worldmap.workers.dev/*`；API restrictions 選 Restrict key → 只勾 **Map Tiles API**。
+5. 在 Cloudflare 新增 Secret `GOOGLE_MAPS_TILE_KEY`。這是瀏覽器端金鑰，前端會看得到，保護靠網域限制。
+6. 在大陸要開 VPN 才連得到 Google；連不到時會自動退回天地圖地形。到 Billing → Budgets 設個預算提醒。
+
+**3. Mapbox（衛星子選項）**
+1. 註冊 https://account.mapbox.com → Tokens → Create a token，權限只留 public scopes（`styles:read`、`tiles:read` 等預設即可）。
+2. URL restrictions 填 `https://world-map.kwok-worldmap.workers.dev`。
+3. 在 Cloudflare 新增 Secret `MAPBOX_TOKEN`。大陸同樣需要 VPN。
+
+### v4 授權
+Liquid Glass 全部是自寫 CSS／SVG，沒有複製任何第三方程式碼；`backdrop-filter:url(#svg)` 折射效果只有 Chromium 支援，Safari 用模糊＋高光替代。
+
+### v4 測試
+`npm test`（146 項）；截圖：`node scripts/screenshots-v4.mjs`（Playwright＋SwiftShader，輸出 `screenshots/v4-*.png`）。標準圖層的 3D 向量底圖在 SwiftShader 下會是空白，無法在開發機驗證樓塊擠出，要在真機看。
+
+---
 
 ## v3（Apple 地圖風格改版）
 

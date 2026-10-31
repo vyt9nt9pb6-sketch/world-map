@@ -89,10 +89,10 @@ test('walking / bicycling / electrobike：各自的上游端點，路線整理�
 });
 
 test('駕車仍可用且回應多了 mode 欄位', async () => {
-  const f = fakeFetch(() => ({ infocode: '10000', route: { paths: [{ distance: '10', steps: [] }] } }));
+  const f = fakeFetch(() => ({ infocode: '10000', route: { paths: [{ distance: '10', steps: [{ polyline: '119,34;119.1,34.1' }] }] } }));
   const res = await handleApiRequest(req(`/api/route?origin=${O}&destination=${D}`), env, { fetchImpl: f });
   assert.equal((await res.json()).mode, 'driving');
-  assert.equal(f.calls[0].url.pathname, '/v5/direction/driving');
+  assert.ok(f.calls.some((c) => c.url.pathname === '/v5/direction/driving'));
 });
 
 // ───────── 公交／火車 ─────────

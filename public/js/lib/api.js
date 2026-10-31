@@ -56,7 +56,11 @@ async function send(method, path, body) {
 const ll = (p) => `${p.lng.toFixed(6)},${p.lat.toFixed(6)}`;
 
 export const api = {
-  search: (q, center, opts) => get('/api/search', { q, location: center ? ll(center) : undefined }, opts),
+  search: (q, center, opts = {}) => {
+    const { area, radius, ...rest } = opts;
+    return get('/api/search', { q, location: center ? ll(center) : undefined, area: area ? 1 : undefined, radius: area ? Math.round(radius) : undefined }, rest);
+  },
+  place: (id, opts) => get('/api/place', { id }, opts),
   geocode: (address, opts) => get('/api/geocode', { address }, opts),
   config: (opts) => get('/api/config', {}, opts),
   regeo: (p, radius, opts) => get('/api/regeo', { location: ll(p), radius }, opts),
@@ -69,7 +73,7 @@ export const api = {
   logout: () => send('POST', '/api/auth/logout', {}),
   favorites: () => get('/api/favorites', {}),
   syncFavorites: (items) => send('POST', '/api/favorites/sync', { items }),
-  route: ({ start, dest, via = [], strategy, mode = 'driving' }, opts) =>
+  route: ({ start, dest, via = [], strategy, mode = 'driving', avoidHighway, avoidToll, depart }, opts) =>
     get(
       '/api/route',
       {
@@ -78,6 +82,9 @@ export const api = {
         waypoints: via.length ? via.map(ll).join(';') : undefined,
         mode,
         strategy,
+        avoid_highway: avoidHighway ? 1 : undefined,
+        avoid_toll: avoidToll ? 1 : undefined,
+        depart: depart || undefined,
         origin_id: start.poiId,
         destination_id: dest.poiId,
       },

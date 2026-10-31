@@ -24,7 +24,7 @@ test('mapSearchResponse：v5 POI', () => {
   assert.equal(m.results.length, 2);
   assert.deepEqual(m.results[0], {
     kind: 'poi', id: 'B0FFM4MUB6', name: '中国石化学院路加油站', address: '学院路', type: '汽车服务;加油站;中国石化',
-    province: '江苏省', city: '连云港市', district: '海州区', adcode: '320706', distance: 1165, tel: '0518-1', lng: 119.225393, lat: 34.60046,
+    province: '江苏省', city: '连云港市', district: '海州区', adcode: '320706', distance: 1165, tel: '0518-1', rating: null, cost: null, openToday: null, photo: null, lng: 119.225393, lat: 34.60046,
   });
   assert.equal(m.results[1].address, '');
   assert.equal(m.results[1].distance, null);

@@ -65,7 +65,7 @@ export function lngLatList(params, field, { max = 16 } = {}) {
 export function int(params, field, { min, max, def }) {
   const raw = params.get(field);
   if (raw == null || raw === '') return def;
-  if (!/^\d{1,4}$/.test(raw)) throw new ValidationError(field, `${field} 必須是整數`);
+  if (!/^\d{1,10}$/.test(raw)) throw new ValidationError(field, `${field} 必須是整數`);
   const n = Number(raw);
   if (n < min || n > max) throw new ValidationError(field, `${field} 必須介於 ${min}–${max}`);
   return n;
@@ -103,6 +103,9 @@ export function validateSearch(params) {
     location: lngLat(params, 'location'),
     city: text(params, 'city', { max: 30 }),
     page: int(params, 'page', { min: 1, max: 10, def: 1 }),
+    // 「搜尋這個區域」：以地圖中心＋半徑做範圍搜尋（不退回全國關鍵字搜尋）
+    area: params.get('area') === '1',
+    radius: int(params, 'radius', { min: 300, max: 50000, def: 50000 }),
   };
 }
 
@@ -138,6 +141,16 @@ export function cityCode(params, field) {
   return raw.trim();
 }
 
+/** 出發時間（unix 秒）。空＝現在出發；可設的範圍：現在往前 5 分鐘到未來 30 天 */
+export function departTime(params, nowSec = Math.floor(Date.now() / 1000)) {
+  const raw = params.get('depart');
+  if (raw == null || raw === '' || raw === 'now') return null;
+  if (!/^\d{9,10}$/.test(raw)) throw new ValidationError('depart', 'depart 必須是 unix 秒數');
+  const t = Number(raw);
+  if (t < nowSec - 300 || t > nowSec + 30 * 86400) throw new ValidationError('depart', '出發時間必須在現在到未來 30 天內');
+  return t <= nowSec ? null : t;
+}
+
 export function validateRoute(params) {
   const mode = oneOf(params, 'mode', ROUTE_MODES, 'driving');
   const v = {
@@ -155,6 +168,9 @@ export function validateRoute(params) {
           : 'recommend',
     originId: poiId(params, 'origin_id'),
     destinationId: poiId(params, 'destination_id'),
+    avoidHighway: params.get('avoid_highway') === '1',
+    avoidToll: params.get('avoid_toll') === '1',
+    depart: departTime(params),
   };
   if (v.origin === v.destination) throw new ValidationError('destination', '起點和終點相同');
   if (mode !== 'driving' && v.waypoints.length) throw new ValidationError('waypoints', '只有駕車支援途經點');
@@ -174,7 +190,7 @@ export function validateNearby(params) {
   return {
     kind,
     location: lngLat(params, 'location', { required: true }),
-    radius: int(params, 'radius', { min: 100, max: 10000, def: 3000 }),
+    radius: int(params, 'radius', { min: 100, max: 50000, def: 3000 }),
     limit: int(params, 'limit', { min: 1, max: 25, def: 25 }),
   };
 }
@@ -198,4 +214,10 @@ export function validateEnvironment(params) {
     return Math.round(n * 100) / 100;
   };
   return { lat: read('lat', 90), lng: read('lng', 180) };
+}
+
+export function validatePlace(params) {
+  const id = poiId(params, 'id');
+  if (!id) throw new ValidationError('id', '缺少參數 id');
+  return { id };
 }

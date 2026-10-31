@@ -6,6 +6,10 @@ import { formatDistance, formatDuration, formatYuan } from './lib/format.js';
 import { amapIosUri, amapWebUrl, appleMapsUrl, detectPlatform } from './lib/navlinks.js';
 import { amapMarkerUrl, shareMessage, smsHref, copyText } from './lib/share.js';
 import { createTiandituFlexible, TIANDITU_ATTRIBUTION } from './lib/tianditu.js';
+import { createMapboxSatFlexible, createGoogleSatFlexible, createGoogleTerrainFlexible, MAPBOX_ATTRIBUTION, GOOGLE_ATTRIBUTION } from './lib/ext-sat.js';
+import { createReachProbe } from './lib/reach.js';
+import { splitTels, telHref, categoryOf, subLine, badgesHtml, photosHtml, infoRows, viewportRadius, movedEnough } from './lib/place-view.js';
+import { drivingCardHtml, routeLabelHtml, midPoint, quickPicks } from './lib/route-view.js';
 import { createWorldCoverFlexible, WORLDCOVER_LEGEND, legendColor, WORLDCOVER_ATTRIBUTION } from './lib/landcover.js';
 import { createStore, findSamePlace } from './lib/favstore.js';
 import { transitSummary, transitDetail, esc } from './lib/transit-view.js';
@@ -20,13 +24,6 @@ const platform = detectPlatform();
 const isDesktop = () => window.matchMedia('(min-width: 900px)').matches;
 const prefersDark = () => window.matchMedia('(prefers-color-scheme: dark)').matches;
 
-const STRATEGIES = [
-  { id: 'recommend', label: '推薦' },
-  { id: 'fastest', label: '速度優先' },
-  { id: 'avoid_tolls', label: '避免收費' },
-  { id: 'highway', label: '高速優先' },
-  { id: 'no_highway', label: '不走高速' },
-];
 const TRANSIT_STRATEGIES = [
   { id: 'recommend', label: '推薦' },
   { id: 'rail_first', label: '鐵路優先' },
@@ -79,6 +76,26 @@ const state = {
   view: 'search',
   placeFrom: 'search',
   pitch3d: false,
+  areaMode: false, // 搜尋結果是否跟著地圖範圍自動更新
+  lastQuery: '',
+  avoidHighway: false,
+  avoidToll: false,
+  depart: null, // epoch 秒；null＝現在出發
+};
+const ROUTE_OPTS_KEY = 'wm.routeopts.v4';
+try {
+  const o = JSON.parse(localStorage.getItem(ROUTE_OPTS_KEY) || '{}');
+  state.avoidHighway = !!o.avoidHighway;
+  state.avoidToll = !!o.avoidToll;
+} catch {
+  /* 沒有儲存的偏好 */
+}
+const saveRouteOpts = () => {
+  try {
+    localStorage.setItem(ROUTE_OPTS_KEY, JSON.stringify({ avoidHighway: state.avoidHighway, avoidToll: state.avoidToll }));
+  } catch {
+    /* 無痕模式 */
+  }
 };
 const store = createStore();
 const history_ = createHistory();
@@ -151,6 +168,7 @@ function showView(v) {
     const p = state.picking;
     $('pick-hint-text').textContent = p === 'start' ? '選擇起點（搜尋或點地圖）' : p === 'dest' ? '選擇終點（搜尋或點地圖）' : '選擇途經點（搜尋或點地圖）';
   }
+  syncAreaUi(false);
   requestAnimationFrame(() => sheet.refresh());
 }
 function showSearchHome() {
@@ -186,18 +204,25 @@ async function initMap() {
   }
   const qs = new URLSearchParams(location.search);
   const startC = qs.get('lng') && qs.get('lat') ? { lng: +qs.get('lng'), lat: +qs.get('lat') } : DEFAULT_CENTER;
-  // Google Map Tiles session（瀏覽器快取；過期前重用）
-  let googleSession = { token: '', expiry: 0 };
-  const ensureGoogleSession = async () => {
+  // Google Map Tiles session（瀏覽器快取；過期前重用）。衛星與地形是兩種 session。
+  const gSessions = { satellite: { token: '', expiry: 0 }, terrain: { token: '', expiry: 0 } };
+  const ensureGoogleSession = async (type = 'satellite') => {
     const now = Date.now() / 1000;
-    if (googleSession.token && googleSession.expiry - 60 > now) return googleSession.token;
-    const r = await fetch('/api/google-tiles/session', { method: 'POST', credentials: 'same-origin' });
+    const cur = gSessions[type];
+    if (cur.token && cur.expiry - 60 > now) return cur.token;
+    const r = await fetch('/api/google-tiles/session', {
+      method: 'POST',
+      credentials: 'same-origin',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({ type }),
+    });
     if (!r.ok) throw new Error('google_session');
     const j = await r.json();
-    googleSession = { token: j.session, expiry: Number(j.expiry) || now + 86400 };
-    return googleSession.token;
+    gSessions[type] = { token: j.session, expiry: Number(j.expiry) || now + 86400 };
+    return gSessions[type].token;
   };
-  window.__wmGoogleSession = () => googleSession.token; // Flexible createTile 同步讀取
+  window.__wmGoogleSession = () => gSessions.satellite.token; // Flexible createTile 同步讀取
+  window.__wmGoogleTerrainSession = () => gSessions.terrain.token;
 
   view = createMapView(AMap, $('map'), {
     center: startC,
@@ -210,6 +235,7 @@ async function initMap() {
     createLandcover: (A) => createWorldCoverFlexible(A),
     createMapboxSat: (A) => createMapboxSatFlexible(A, { token: state.config.mapbox.token }),
     createGoogleSat: (A) => createGoogleSatFlexible(A, { key: state.config.googleTiles.key, getSession: () => window.__wmGoogleSession() }),
+    createGoogleTerrain: (A) => createGoogleTerrainFlexible(A, { key: state.config.googleTiles.key, getSession: () => window.__wmGoogleTerrainSession() }),
   });
   view._ensureGoogleSession = ensureGoogleSession;
   groups = {
@@ -228,6 +254,7 @@ async function initMap() {
   view.on('viewchange', () => {
     syncHud();
     if (state.layer.mode === 'transit') drawRailStations();
+    scheduleViewSettled();
   });
   view.on('dragstart', () => {
     if (document.activeElement === $('search-input')) $('search-input').blur();
@@ -262,7 +289,10 @@ function loadLayerPref() {
     /* 略過 */
   }
 }
+const googleReachable = createReachProbe();
+let layerSeq = 0;
 async function applyLayer() {
+  const seq = ++layerSeq;
   const L = state.layer;
   const f = state.config?.features || {};
   const tdtOk = !!f.tianditu && !!state.config?.tianditu?.tk;
@@ -271,11 +301,28 @@ async function applyLayer() {
   if (L.source === 'tianditu' && !tdtOk) L.source = 'amap';
   if (L.source === 'mapbox' && !mapboxOk) L.source = 'amap';
   if (L.source === 'google' && !googleOk) L.source = 'amap';
-  if (L.mode === 'terrain' && !tdtOk) L.mode = 'standard';
   if (L.mode === 'satellite' && L.source === 'google' && view?._ensureGoogleSession) {
-    try { await view._ensureGoogleSession(); } catch { toast('Google 衛星 session 建立失敗（大陸常需 VPN）'); L.source = 'amap'; }
+    try { await view._ensureGoogleSession('satellite'); } catch { toast('Google 衛星 session 建立失敗（大陸常需 VPN）'); L.source = 'amap'; }
   }
-  view?.setLayerMode(L.mode, { labels: L.labels, satSource: L.source });
+  // 地形來源：有 Google 金鑰且「現在連得到 Google」（通常代表 VPN 開著）→ Google 地形；否則天地圖 ter_w
+  let terrainSrc = 'tianditu';
+  if (L.mode === 'terrain') {
+    if (googleOk && view?._ensureGoogleSession && (await googleReachable())) {
+      try {
+        await view._ensureGoogleSession('terrain');
+        terrainSrc = 'google';
+      } catch {
+        terrainSrc = 'tianditu';
+      }
+    }
+    if (terrainSrc === 'tianditu' && !tdtOk) {
+      toast(googleOk ? '連不到 Google 地形（請開 VPN），也沒有天地圖地形可用' : '地形圖需要 TIANDITU_TK 或 GOOGLE_MAPS_TILE_KEY');
+      L.mode = 'standard';
+    }
+  }
+  if (seq !== layerSeq) return; // 期間使用者又換了圖層
+  state.terrainSource = terrainSrc;
+  view?.setLayerMode(L.mode, { labels: L.labels, satSource: L.source, terrainSource: terrainSrc });
   document.body.classList.toggle('sat', L.mode === 'satellite');
   document.querySelectorAll('#layer-cards [data-layer]').forEach((b) => b.setAttribute('aria-checked', String(b.dataset.layer === L.mode)));
   document.querySelectorAll('#opt-source [data-source]').forEach((b) => b.setAttribute('aria-checked', String(b.dataset.source === L.source)));
@@ -288,21 +335,35 @@ async function applyLayer() {
   $('opt-labels').setAttribute('aria-checked', String(L.labels));
   const satUi = L.mode === 'satellite';
   $('opt-source').classList.toggle('hidden', !satUi);
-  $('opt-labels').closest('.opt-row').classList.toggle('hidden', !(satUi || L.mode === 'terrain'));
+  // Google 地形本身含道路地名，不提供標註開關
+  $('opt-labels').closest('.opt-row').classList.toggle('hidden', !(satUi || (L.mode === 'terrain' && terrainSrc !== 'google')));
   $('opt-transit-note').classList.toggle('hidden', L.mode !== 'transit');
-  $('opt-terrain-note')?.classList.toggle('hidden', L.mode !== 'terrain');
+  const terNote = $('opt-terrain-note');
+  if (terNote) {
+    terNote.classList.toggle('hidden', L.mode !== 'terrain');
+    $('terrain-note-text').textContent =
+      terrainSrc === 'google'
+        ? '地形來源：Google 地形（偵測到你連得到 Google，應該是 VPN 開著）。'
+        : googleOk
+          ? '地形來源：天地圖 ter_w。開 VPN 後重新點一次「地形」會自動換成 Google 地形。'
+          : '地形來源：天地圖 ter_w（暈渲）＋ cta_w（注記），中國境內自動平移對齊高德。';
+  }
   $('opt-sat-vpn-note')?.classList.toggle('hidden', !(satUi && (L.source === 'mapbox' || L.source === 'google')));
   const globalSat = L.mode === 'satellite' && L.source === 'tianditu';
   $('opt-global-sat').setAttribute('aria-checked', String(globalSat));
   $('opt-global-sat').disabled = !tdtOk;
   $('opt-landcover').setAttribute('aria-checked', String(L.mode === 'landcover'));
   const terBtn = document.querySelector('#layer-cards [data-layer="terrain"]');
-  if (terBtn) { terBtn.disabled = !tdtOk; terBtn.title = tdtOk ? '' : '需要 TIANDITU_TK'; }
+  if (terBtn) {
+    terBtn.disabled = !(tdtOk || googleOk);
+    terBtn.title = tdtOk || googleOk ? '' : '需要 TIANDITU_TK 或 GOOGLE_MAPS_TILE_KEY';
+  }
 
   $('landcover-legend').classList.toggle('hidden', L.mode !== 'landcover');
   const attrib = $('map-attrib');
   attrib.textContent =
     L.mode === 'landcover' ? '© ESA WorldCover 2021 · CC BY 4.0'
+    : L.mode === 'terrain' && terrainSrc === 'google' ? GOOGLE_ATTRIBUTION
     : L.mode === 'terrain' && tdtOk ? TIANDITU_ATTRIBUTION
     : globalSat && tdtOk ? TIANDITU_ATTRIBUTION
     : L.mode === 'satellite' && L.source === 'mapbox' ? MAPBOX_ATTRIBUTION
@@ -592,9 +653,14 @@ async function doSearch(q) {
   q = (q || '').trim();
   if (!q) return;
   history_.add(q);
+  state.areaMode = false;
+  state.lastQuery = q;
+  areaCtrl?.abort();
   $('search-input').value = q;
   $('search-clear').classList.remove('hidden');
   $('search-cancel').classList.remove('hidden');
+  $('area-suggest').classList.add('hidden');
+  syncAreaUi();
   searchCtrl?.abort();
   searchCtrl = new AbortController();
   const { signal } = searchCtrl;
@@ -621,8 +687,117 @@ async function doSearch(q) {
   }
   setStatus('search-status', `找到 ${list.length} 筆結果`);
   renderResults();
+  suppressArea();
   view?.fit(list.map((r) => ({ lng: r.lng, lat: r.lat })), mapPad());
 }
+
+/* ---- 搜尋附近：結果跟著地圖範圍更新（拖曳／縮放後 600 ms 自動重查，並有快取與最短間隔保護高德額度） ---- */
+let areaCtrl;
+let areaTimer;
+let areaBase = null; // 上次搜尋時的 { center, zoom, radius }
+let suppressUntil = 0;
+let lastAreaAt = 0;
+const areaCache = new Map();
+const AREA_DEBOUNCE_MS = 600;
+const AREA_MIN_GAP_MS = 1500;
+const suppressArea = (ms = 2200) => {
+  suppressUntil = Date.now() + ms;
+};
+function viewSnapshot() {
+  if (!view) return null;
+  const el = $('map');
+  const center = view.getCenter();
+  const zoom = view.getZoom();
+  const width = el.clientWidth - (isDesktop() ? 440 : 0);
+  const height = el.clientHeight - (isDesktop() ? 0 : Math.min(sheet.height, detents().half));
+  return { center, zoom, radius: viewportRadius({ zoom, lat: center.lat, width: Math.max(160, width), height: Math.max(160, height) }) };
+}
+const distLL = (a, b) => haversine(a.lng, a.lat, b.lng, b.lat);
+function syncAreaUi(showBtn = false) {
+  $('btn-area-mode').setAttribute('aria-pressed', String(state.areaMode));
+  $('area-btn').classList.toggle('hidden', !(showBtn && !state.areaMode && state.view === 'search' && state.searchMode === 'results'));
+}
+async function runAreaSearch(q) {
+  const snap = viewSnapshot();
+  if (!snap || !q) return;
+  areaBase = snap;
+  lastAreaAt = Date.now();
+  syncAreaUi(false);
+  areaCtrl?.abort();
+  areaCtrl = new AbortController();
+  const { signal } = areaCtrl;
+  const key = `${q}|${snap.center.lng.toFixed(3)},${snap.center.lat.toFixed(3)}|${Math.round(snap.radius / 150)}`;
+  setStatus('search-status', '搜尋此區域…');
+  try {
+    let data = areaCache.get(key);
+    if (!data) {
+      data = await api.search(q, snap.center, { area: true, radius: snap.radius, signal });
+      areaCache.set(key, data);
+      if (areaCache.size > 40) areaCache.delete(areaCache.keys().next().value);
+    }
+    if (signal.aborted) return;
+    state.results = data.results;
+    state.selectedIdx = -1;
+    renderResults();
+    setStatus('search-status', data.results.length ? `這個範圍（半徑約 ${formatDistance(snap.radius)}）找到 ${data.results.length} 筆「${q}」，拖曳或縮放地圖會自動更新` : `這個範圍內沒有「${q}」，試著拖曳或縮放地圖`);
+  } catch (e) {
+    if (e.name === 'AbortError') return;
+    setStatus('search-status', e.message || '搜尋失敗', true);
+  }
+}
+function startAreaSearch(q) {
+  q = (q || '').trim();
+  if (!q) return;
+  history_.add(q);
+  state.areaMode = true;
+  state.lastQuery = q;
+  searchCtrl?.abort();
+  $('search-input').value = q;
+  $('search-input').blur();
+  $('search-clear').classList.remove('hidden');
+  $('search-cancel').classList.remove('hidden');
+  $('area-suggest').classList.add('hidden');
+  showSearchResults();
+  setSnap('half');
+  groups?.results.clear();
+  $('results').innerHTML = '';
+  runAreaSearch(q);
+}
+function onViewSettled() {
+  if (!view) return;
+  if (Date.now() < suppressUntil) {
+    areaBase = viewSnapshot();
+    nearbyBase = areaBase;
+    return;
+  }
+  const snap = viewSnapshot();
+  if (state.view === 'search' && state.searchMode === 'results' && state.lastQuery) {
+    if (!movedEnough(areaBase, snap, distLL)) return;
+    if (!state.areaMode) return syncAreaUi(true);
+    const wait = AREA_MIN_GAP_MS - (Date.now() - lastAreaAt);
+    if (wait > 0) return scheduleViewSettled(wait);
+    runAreaSearch(state.lastQuery);
+  } else if (state.view === 'nearby' && nearbyKind && nearbyAuto) {
+    if (!movedEnough(nearbyBase, snap, distLL)) return;
+    const wait = AREA_MIN_GAP_MS - (Date.now() - lastAreaAt);
+    if (wait > 0) return scheduleViewSettled(wait);
+    lastAreaAt = Date.now();
+    runNearby(nearbyKind, { forceMap: true, auto: true });
+  }
+}
+function scheduleViewSettled(ms = AREA_DEBOUNCE_MS) {
+  clearTimeout(areaTimer);
+  areaTimer = setTimeout(onViewSettled, ms);
+}
+$('area-btn').addEventListener('click', () => {
+  if (state.lastQuery) runAreaSearch(state.lastQuery);
+});
+$('btn-area-mode').addEventListener('click', () => {
+  state.areaMode = !state.areaMode;
+  syncAreaUi(false);
+  if (state.areaMode && state.lastQuery) runAreaSearch(state.lastQuery);
+});
+$('area-suggest').addEventListener('click', () => startAreaSearch($('search-input').value));
 function renderResults() {
   const ul = $('results');
   ul.innerHTML = '';
@@ -647,7 +822,8 @@ function selectResult(i) {
   if (!r) return;
   state.selectedIdx = i;
   if (state.picking) return assignStop(state.picking, toStop(r));
-  showPlace(toStop(r), { addr: r.kind === 'address' ? r.address : [r.address, (r.city || '') + (r.district || '')].filter(Boolean).join(' · '), zoom: 16 });
+  suppressArea();
+  showPlace(toStop(r), { addr: r.kind === 'address' ? r.address : [r.address, (r.city || '') + (r.district || '')].filter(Boolean).join(' · '), zoom: 16, data: r.kind === 'poi' ? r : null });
 }
 $('search-form').addEventListener('submit', (e) => {
   e.preventDefault();
@@ -659,6 +835,8 @@ $('search-input').addEventListener('input', () => {
   $('search-clear').classList.toggle('hidden', !v);
   if (state.searchMode === 'results') showSearchHome();
   renderHistory(v);
+  $('area-suggest').classList.toggle('hidden', !v || state.picking);
+  $('area-suggest-name').textContent = v ? `搜尋附近「${v}」` : '';
   sheet.refresh();
 });
 $('search-input').addEventListener('focus', () => {
@@ -672,6 +850,11 @@ $('search-input').addEventListener('focus', () => {
 });
 function resetSearch() {
   searchCtrl?.abort();
+  areaCtrl?.abort();
+  state.areaMode = false;
+  state.lastQuery = '';
+  $('area-suggest').classList.add('hidden');
+  syncAreaUi();
   $('search-input').value = '';
   $('search-clear').classList.add('hidden');
   $('search-cancel').classList.add('hidden');
@@ -688,6 +871,11 @@ $('search-clear').addEventListener('click', () => {
 });
 function resetSearchResultsOnly() {
   searchCtrl?.abort();
+  areaCtrl?.abort();
+  state.areaMode = false;
+  state.lastQuery = '';
+  $('area-suggest').classList.add('hidden');
+  syncAreaUi();
   state.results = [];
   groups?.results.clear();
   $('results').innerHTML = '';
@@ -707,6 +895,8 @@ $('pick-cancel').addEventListener('click', () => {
 /* ---------------- 地點卡（點地圖／長按／搜尋結果） ---------------- */
 let placeStop = null;
 let placeSeq = 0;
+let placeData = null; // 目前地點的資料（搜尋結果摘要＋/api/place 詳細資料）
+let placeRows = null; // 自訂資訊列（我的位置、等待查詢中）；null＝由 placeData 產生
 function placeInfoRows(rows) {
   $('place-info').innerHTML = rows.filter(Boolean).map(([k, v]) => `<div class="row"><span>${esc(k)}</span><span>${v}</span></div>`).join('');
   $('place-info').classList.toggle('hidden', !rows.filter(Boolean).length);
@@ -716,13 +906,70 @@ function dropPin(stop) {
   groups.drop.clear();
   if (stop && !stop.isCurrentLocation) groups.drop.add(view?.marker({ lng: stop.lng, lat: stop.lat, html: pinHtml('drop', ''), anchor: 'bottom-center', zIndex: 200 }));
 }
-function showPlace(stop, { addr, rows, zoom, keepView = false } = {}) {
+// Apple 地圖風格的地點頁：名稱、類別、距離、評分／人均／營業時間、照片、電話、按鈕。沒有的欄位就不顯示。
+function renderPlaceRich() {
+  const stop = placeStop;
+  if (!stop) return;
+  const d = placeData;
+  const dist = state.me && !stop.isCurrentLocation ? haversine(state.me.lng, state.me.lat, stop.lng, stop.lat) : null;
+  const sub = d ? subLine(d, dist) : '';
+  $('place-sub').textContent = sub;
+  $('place-sub').classList.toggle('hidden', !sub);
+  const badges = d ? badgesHtml(d) : '';
+  $('place-badges').innerHTML = badges;
+  $('place-badges').classList.toggle('hidden', !badges);
+  const photos = d?.photos?.length ? d.photos : d?.photo ? [{ url: d.photo }] : [];
+  const ph = photosHtml(photos);
+  $('place-photos').innerHTML = ph;
+  $('place-photos').classList.toggle('hidden', !ph);
+  placeInfoRows(placeRows ?? infoRows(d, { distance: dist, lat: stop.lat, lng: stop.lng }));
+  const tels = d ? splitTels(d.tels?.length ? d.tels : d.tel) : [];
+  $('place-call').classList.toggle('hidden', !tels.length || !!stop.isCurrentLocation);
+  $('place-call').dataset.tel = tels[0] ? telHref(tels[0]) : '';
+}
+$('place-photos').addEventListener(
+  'error',
+  (e) => {
+    if (e.target.tagName !== 'IMG') return;
+    e.target.closest('a')?.remove();
+    if (!$('place-photos').children.length) $('place-photos').classList.add('hidden');
+  },
+  true,
+);
+$('place-call').addEventListener('click', () => {
+  const href = $('place-call').dataset.tel;
+  if (href) window.location.href = href;
+});
+const detailCache = new Map();
+let detailCtrl;
+async function loadPlaceDetail(stop) {
+  const id = stop.poiId;
+  if (!id) return;
+  detailCtrl?.abort();
+  try {
+    let d = detailCache.get(id);
+    if (!d) {
+      detailCtrl = new AbortController();
+      d = (await api.place(id, { signal: detailCtrl.signal })).place;
+      detailCache.set(id, d);
+      if (detailCache.size > 60) detailCache.delete(detailCache.keys().next().value);
+    }
+    if (placeStop !== stop) return;
+    const clean = Object.fromEntries(Object.entries(d).filter(([, v]) => v != null && !(Array.isArray(v) && !v.length) && v !== ''));
+    placeData = { ...(placeData || {}), ...clean };
+    renderPlaceRich();
+  } catch {
+    /* 詳細資料是加分項：失敗就維持已顯示的內容 */
+  }
+}
+function showPlace(stop, { addr, rows, zoom, keepView = false, data = null } = {}) {
   placeStop = stop;
+  placeData = data ? { ...data } : null;
+  placeRows = rows ?? null;
   if (state.view !== 'place') state.placeFrom = state.view === 'route' ? 'route' : state.view;
   $('place-name').textContent = stop.name;
   $('place-addr').textContent = addr ?? `${stop.lat.toFixed(5)}, ${stop.lng.toFixed(5)}`;
-  const coordRow = ['座標', `${stop.lat.toFixed(5)}, ${stop.lng.toFixed(5)}`];
-  placeInfoRows(rows ?? [coordRow]);
+  renderPlaceRich();
   $('place-route').classList.toggle('hidden', !!stop.isCurrentLocation);
   $('place-fav').classList.toggle('hidden', !!stop.isCurrentLocation);
   $('place-share').classList.remove('hidden');
@@ -731,6 +978,8 @@ function showPlace(stop, { addr, rows, zoom, keepView = false } = {}) {
   dropPin(stop);
   showView('place');
   setSnap('half');
+  $('view-place').querySelector('.scroll')?.scrollTo?.(0, 0);
+  if (stop.poiId && !stop.isCurrentLocation) loadPlaceDetail(stop);
   if (view && !keepView) {
     if (zoom) view.flyTo(stop, Math.max(view.getZoom(), zoom), mapPad());
     else setTimeout(() => view.ensureVisible(stop, mapPad()), 60);
@@ -757,17 +1006,7 @@ async function selectPoint(p, { radius = 60, long = false } = {}) {
     const isPlace = r.kind === 'poi' || r.kind === 'aoi';
     const stop = { lng: isPlace ? r.lng : p.lng, lat: isPlace ? r.lat : p.lat, name: long && !isPlace ? '已標記的位置' : r.name, poiId: r.kind === 'poi' ? r.id : undefined };
     const region = [r.province, r.city, r.district].filter(Boolean).filter((x, i, a) => a.indexOf(x) === i).join('');
-    const rows = [
-      r.type ? ['類型', esc(r.type.split(';').slice(-1)[0])] : null,
-      r.tel ? ['電話', `<a href="tel:${esc(String(r.tel).split(';')[0])}">${esc(String(r.tel).split(';')[0])}</a>`] : null,
-      r.distance != null && isPlace ? ['與點選位置相距', formatDistance(r.distance)] : null,
-      ['座標', `${stop.lat.toFixed(5)}, ${stop.lng.toFixed(5)}`],
-    ];
-    showPlace(stop, { addr: r.address || region || '', rows, keepView: true });
-    if (state.me) {
-      const d = haversine(state.me.lng, state.me.lat, stop.lng, stop.lat);
-      if (d > 30) placeInfoRows([...rows.slice(0, -1), ['距離你', formatDistance(d)], rows.at(-1)]);
-    }
+    showPlace(stop, { addr: r.address || region || '', keepView: true, data: isPlace ? r : null });
   } catch (e) {
     if (e.name === 'AbortError' || seq !== placeSeq) return;
     showPlace(pending, { addr: `${e.message || '查不到地點資訊'}（仍可使用座標）`, keepView: true });
@@ -890,9 +1129,65 @@ function drawStops() {
   add(state.dest, 'dest', '終');
 }
 const chips = $('strategy-chips');
+/* ---- 出發時間、避開高速／收費 ---- */
+const pad2 = (n) => String(n).padStart(2, '0');
+const toLocalInput = (d) => `${d.getFullYear()}-${pad2(d.getMonth() + 1)}-${pad2(d.getDate())}T${pad2(d.getHours())}:${pad2(d.getMinutes())}`;
+function syncRouteOpts() {
+  const drv = state.mode === 'driving';
+  const withDepart = drv || state.mode === 'transit';
+  $('route-opts').classList.toggle('hidden', !withDepart);
+  $('row-avoid-hw').classList.toggle('hidden', !drv);
+  $('row-avoid-toll').classList.toggle('hidden', !drv);
+  $('opt-avoid-hw').checked = state.avoidHighway;
+  $('opt-avoid-toll').checked = state.avoidToll;
+  const at = state.depart != null;
+  document.querySelectorAll('#depart-seg [data-d]').forEach((b) => b.setAttribute('aria-checked', String((b.dataset.d === 'at') === at)));
+  $('depart-input').classList.toggle('hidden', !at);
+  const parts = [at ? `${new Date(state.depart * 1000).toLocaleString('zh-TW', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit', hour12: false })} 出發` : '現在出發'];
+  if (drv && state.avoidHighway) parts.push('避開高速');
+  if (drv && state.avoidToll) parts.push('避開收費');
+  $('route-opts-sum').textContent = parts.join('・');
+}
+$('opt-avoid-hw').addEventListener('change', (e) => {
+  state.avoidHighway = e.target.checked;
+  saveRouteOpts();
+  if (state.dest) planRoute();
+});
+$('opt-avoid-toll').addEventListener('change', (e) => {
+  state.avoidToll = e.target.checked;
+  saveRouteOpts();
+  if (state.dest) planRoute();
+});
+$('depart-seg').addEventListener('click', (e) => {
+  const b = e.target.closest('[data-d]');
+  if (!b) return;
+  if (b.dataset.d === 'now') {
+    state.depart = null;
+  } else if (state.depart == null) {
+    const d = new Date(Date.now() + 30 * 60000);
+    d.setSeconds(0, 0);
+    state.depart = Math.floor(d.getTime() / 1000);
+    $('depart-input').min = toLocalInput(new Date());
+    $('depart-input').max = toLocalInput(new Date(Date.now() + 29 * 86400000));
+    $('depart-input').value = toLocalInput(d);
+  }
+  syncRouteOpts();
+  if (state.dest) planRoute();
+});
+$('depart-input').addEventListener('change', (e) => {
+  const t = new Date(e.target.value).getTime();
+  if (!Number.isFinite(t)) return;
+  if (t < Date.now() - 60000) {
+    toast('出發時間不能早於現在');
+    state.depart = null;
+    syncRouteOpts();
+  } else state.depart = Math.floor(t / 1000);
+  if (state.dest) planRoute();
+});
 function renderStrategyChips() {
   chips.innerHTML = '';
-  const list = state.mode === 'driving' ? STRATEGIES : state.mode === 'transit' ? TRANSIT_STRATEGIES : [];
+  const list = state.mode === 'transit' ? TRANSIT_STRATEGIES : [];
+  syncRouteOpts();
   chips.classList.toggle('hidden', !list.length);
   const key = state.mode === 'driving' ? 'strategy' : 'transitStrategy';
   for (const st of list) {
@@ -944,6 +1239,8 @@ function clearRoute() {
   groups?.route.clear();
   groups?.stops.clear();
   $('route-options').innerHTML = '';
+  $('route-quick').classList.add('hidden');
+  $('route-depart-note').classList.add('hidden');
   $('nav-buttons').classList.add('hidden');
   $('nav-note').classList.add('hidden');
   setStatus('route-status', '');
@@ -990,23 +1287,38 @@ async function planRoute() {
   routeCtrl = new AbortController();
   try {
     const mode = state.mode;
-    const strategy = mode === 'driving' ? state.strategy : mode === 'transit' ? state.transitStrategy : undefined;
+    const strategy = mode === 'driving' ? undefined : mode === 'transit' ? state.transitStrategy : undefined;
+    const depart = state.depart != null && (mode === 'driving' || mode === 'transit') ? Math.max(state.depart, Math.floor(Date.now() / 1000)) : undefined;
     const via = mode === 'driving' ? state.via.filter(Boolean) : [];
-    const data = await api.route({ start, dest: state.dest, via, strategy, mode }, { signal: routeCtrl.signal });
+    const data = await api.route(
+      { start, dest: state.dest, via, strategy, mode, avoidHighway: mode === 'driving' && state.avoidHighway, avoidToll: mode === 'driving' && state.avoidToll, depart },
+      { signal: routeCtrl.signal },
+    );
     if (mode !== state.mode) return;
     state.routes = data.routes;
     state.routeIdx = 0;
     state.resolvedStart = start;
-    state.routeMeta = { railFirst: !!data.railFirst, hasTrain: data.hasTrain };
+    state.routeMeta = { railFirst: !!data.railFirst, hasTrain: data.hasTrain, depart: data.depart || null, tollNote: data.tollNote || null };
     if (!data.routes.length) return setStatus('route-status', mode === 'transit' ? '找不到公交／火車方案（距離太遠或沒有班次）' : '找不到路線', true);
-    let msg = data.routes.length > 1 ? `共 ${data.routes.length} 條路線，點選可切換` : '';
+    let msg = data.routes.length > 1 ? `共 ${data.routes.length} 條路線，點卡片或地圖上的路線可切換` : '';
     if (data.railFirst && data.hasTrain === false) msg = '這段距離找不到含火車的方案，下面是一般公交／地鐵方案。' + (msg ? ' ' + msg : '');
     setStatus('route-status', msg);
     renderRoutes(true);
+    scrollRoutesIntoView();
   } catch (e) {
     if (e.name === 'AbortError') return;
     setStatus('route-status', e.message || '路線規劃失敗', true);
   }
+}
+/** 半高面板時，路線卡片會在起終點卡片下方；算好路線後把清單捲到「路線選項」，卡片一眼就看得到（往上滑仍可改起終點） */
+function scrollRoutesIntoView() {
+  requestAnimationFrame(() => {
+    const sc = $('view-route').querySelector('.scroll');
+    const t = $('route-opts').classList.contains('hidden') ? $('route-status') : $('route-opts');
+    if (!sc || !t) return;
+    const dy = t.getBoundingClientRect().top - sc.getBoundingClientRect().top - 4;
+    if (dy > 0) sc.scrollTo({ top: sc.scrollTop + dy, behavior: 'smooth' });
+  });
 }
 function stepsHtml(r) {
   if (!r.steps?.length) return '';
@@ -1016,16 +1328,7 @@ function stepsHtml(r) {
 }
 function routeCard(r, sel) {
   const mode = state.mode;
-  if (mode === 'driving') {
-    const meta = [];
-    if (r.roads.length) meta.push('經 ' + r.roads.slice(0, 4).join('、'));
-    if (r.tollDistance) meta.push(`收費路段 ${formatDistance(r.tollDistance)}`);
-    if (r.trafficLights) meta.push(`紅綠燈 ${r.trafficLights} 個`);
-    return `<div class="top"><span class="dur">${formatDuration(r.duration)}</span><span class="dist">${formatDistance(r.distance)}</span>
-      <span class="toll">過路費 ${formatYuan(r.tolls)}</span></div>
-      <div class="meta">${esc(meta.join(' · '))}</div>
-      ${r.restriction ? '<div class="warn">⚠ 此路線有無法避開的限行路段</div>' : ''}`;
-  }
+  if (mode === 'driving') return drivingCardHtml(r, { departSec: state.depart });
   if (mode === 'transit') {
     const fee = r.fee != null ? `<span class="fee">車費 ${formatYuan(r.fee)}</span>` : '';
     return `<div class="top"><span class="dur">${formatDuration(r.duration)}</span><span class="dist">${formatDistance(r.distance)}</span>${fee}</div>
@@ -1080,6 +1383,10 @@ function renderRoutes(fit = false) {
     }
     const path = r.polyline.map(([lng, lat]) => [lng, lat]);
     if (path.length < 2) continue;
+    if (state.mode === 'driving' && state.routes.length > 1) {
+      const mp = midPoint(path, [0.5, 0.36, 0.64, 0.28, 0.72][i % 5]);
+      if (mp) groups.route.add(view?.marker({ lng: mp.lng, lat: mp.lat, html: routeLabelHtml(r, sel), zIndex: sel ? 90 : 60, onClick: () => { state.routeIdx = i; renderRoutes(); } }));
+    }
     if (sel) groups.route.add(view?.polyline({ path, color: '#ffffff', weight: 11, opacity: 0.95, zIndex: 40 }));
     groups.route.add(
       view?.polyline({
@@ -1096,6 +1403,8 @@ function renderRoutes(fit = false) {
     );
   }
   $('nav-buttons').classList.remove('hidden');
+  renderQuickPicks();
+  renderDepartNote();
   const notes = [];
   if (state.mode === 'driving') {
     if (state.via.length > 1) notes.push('高德網頁版只帶第 1 個途經點；高德 App 帶全部途經點。');
@@ -1115,9 +1424,39 @@ function renderRoutes(fit = false) {
   }
 }
 
+function renderQuickPicks() {
+  const box = $('route-quick');
+  const picks = state.mode === 'driving' ? quickPicks(state.routes) : [];
+  box.classList.toggle('hidden', !picks.length);
+  box.innerHTML = '';
+  for (const p of picks) {
+    const b = document.createElement('button');
+    b.type = 'button';
+    b.className = 'chip';
+    b.setAttribute('aria-checked', String(p.index === state.routeIdx));
+    b.textContent = p.label;
+    b.addEventListener('click', () => {
+      state.routeIdx = p.index;
+      renderRoutes(true);
+    });
+    box.appendChild(b);
+  }
+}
+function renderDepartNote() {
+  const m = state.routeMeta || {};
+  const notes = [];
+  if (m.tollNote === 'no_toll_free') notes.push('找不到完全不收費的路線，下列路線仍有收費路段。');
+  if (m.depart && state.mode === 'driving') {
+    notes.push('你設定了出發時間，但高德個人金鑰不提供「預測出發時間」的路況（官方只開放企業帳號）。駕車時間是以現在的即時路況估算，「抵達」時刻＝出發時間＋行駛時間，實際可能不同。');
+  } else if (m.depart && state.mode === 'transit') notes.push('公交／火車方案是以你設定的出發時間查詢的班次。');
+  $('route-depart-note').textContent = notes.join(' ');
+  $('route-depart-note').classList.toggle('hidden', !notes.length);
+}
+
 /* ---- 交給導航 App ---- */
 function navArgs() {
-  return { start: state.start, dest: state.dest, via: state.mode === 'driving' ? state.via.filter(Boolean) : [], strategy: state.strategy, mode: state.mode };
+  const strategy = state.avoidToll ? 'avoid_tolls' : state.avoidHighway ? 'no_highway' : 'recommend';
+  return { start: state.start, dest: state.dest, via: state.mode === 'driving' ? state.via.filter(Boolean) : [], strategy, mode: state.mode };
 }
 $('nav-amap').addEventListener('click', () => {
   if (!state.dest) return;
@@ -1142,6 +1481,8 @@ $('nav-apple').addEventListener('click', () => {
 let nearbyKind = null;
 let nearbyItems = [];
 let nearbyCtrl;
+let nearbyAuto = false;
+let nearbyBase = null;
 function nearbyCenter(forceMap) {
   const c = centerOf();
   if (!forceMap && state.me && haversine(state.me.lng, state.me.lat, c.lng, c.lat) < 5000) return { lng: state.me.lng, lat: state.me.lat };
@@ -1149,6 +1490,7 @@ function nearbyCenter(forceMap) {
 }
 function clearNearby() {
   nearbyKind = null;
+  nearbyAuto = false;
   nearbyItems = [];
   nearbyCtrl?.abort();
   groups?.nearby.clear();
@@ -1168,55 +1510,68 @@ function renderNearbyKinds() {
   }
   box.querySelectorAll('.chip').forEach((c) => c.setAttribute('aria-checked', String(c.dataset.kind === nearbyKind)));
 }
-async function runNearby(kind, { forceMap = false } = {}) {
+async function runNearby(kind, { forceMap = false, auto = false } = {}) {
   nearbyKind = kind;
   const info = NEARBY[kind];
   $('nearby-title').textContent = `附近的${info.label}`;
-  $('nearby-list').innerHTML = '';
-  groups?.nearby.clear();
   renderNearbyKinds();
-  setStatus('nearby-status', '搜尋中…');
-  showView('nearby');
-  setSnap('half');
+  if (!auto) {
+    $('nearby-list').innerHTML = '';
+    groups?.nearby.clear();
+    setStatus('nearby-status', '搜尋中…');
+    showView('nearby');
+    setSnap('half');
+  } else setStatus('nearby-status', '更新此區域…');
+  nearbyAuto = true;
   nearbyCtrl?.abort();
   nearbyCtrl = new AbortController();
   const { signal } = nearbyCtrl;
-  const center = nearbyCenter(forceMap);
+  const snap = viewSnapshot();
+  // 自動更新：用目前地圖範圍（以地圖中心為準）；第一次：以我的位置或地圖中心，3 公里 → 10 公里
+  const center = auto ? snap.center : nearbyCenter(forceMap);
   try {
-    let radius = 3000;
+    let radius = auto ? snap.radius : 3000;
     let data = await api.nearby({ kind, center, radius }, { signal });
-    if (!data.results.length) {
+    if (!data.results.length && !auto) {
       radius = 10000;
       data = await api.nearby({ kind, center, radius }, { signal });
     }
     if (signal.aborted) return;
     nearbyItems = data.results;
-    if (!nearbyItems.length) return setStatus('nearby-status', `${radius / 1000} 公里內找不到${info.label}`);
-    setStatus('nearby-status', `${radius / 1000} 公里內找到 ${nearbyItems.length} 個${info.label}，依距離排序`);
-    renderNearby(center);
+    nearbyBase = auto ? snap : { ...(snap || {}), center: snap?.center ?? center, radius: snap?.radius ?? radius };
+    if (!auto) suppressArea();
+    const rText = radius >= 1000 ? `${+(radius / 1000).toFixed(1)} 公里` : `${radius} 公尺`;
+    if (!nearbyItems.length) {
+      $('nearby-list').innerHTML = '';
+      groups?.nearby.clear();
+      return setStatus('nearby-status', `${rText}內找不到${info.label}${auto ? '，拖曳或縮放地圖再試' : ''}`);
+    }
+    setStatus('nearby-status', `${rText}內找到 ${nearbyItems.length} 個${info.label}，依距離排序${auto ? '' : '；拖曳或縮放地圖會自動更新'}`);
+    renderNearby(center, { fit: !auto });
   } catch (e) {
     if (e.name === 'AbortError') return;
     setStatus('nearby-status', e.message || '搜尋失敗', true);
   }
 }
-function renderNearby(center) {
+function renderNearby(center, { fit = true } = {}) {
   const ul = $('nearby-list');
   ul.innerHTML = '';
   const info = NEARBY[nearbyKind];
   nearbyItems.forEach((r, i) => {
     const li = document.createElement('li');
-    li.innerHTML = `<span class="ico">${info.emoji}</span><div class="body"><div class="name">${esc(r.name)}</div><div class="sub">${esc([r.address, r.openTime].filter(Boolean).join(' · '))}</div></div>${r.distance != null ? `<div class="dist">${formatDistance(r.distance)}</div>` : ''}`;
+    li.innerHTML = `<span class="ico">${info.emoji}</span><div class="body"><div class="name">${esc(r.name)}</div><div class="sub">${esc([r.address, r.openToday ? '今日 ' + r.openToday : ''].filter(Boolean).join(' · '))}</div></div>${r.distance != null ? `<div class="dist">${formatDistance(r.distance)}</div>` : ''}`;
     li.addEventListener('click', () => pickNearby(i));
     ul.appendChild(li);
     groups?.nearby.add(view?.marker({ lng: r.lng, lat: r.lat, html: emojiHtml(info.emoji), zIndex: 110, title: r.name, onClick: () => pickNearby(i) }));
   });
-  view?.fit([center, ...nearbyItems.slice(0, 8)].map((r) => ({ lng: r.lng, lat: r.lat })), mapPad());
+  if (fit) view?.fit([center, ...nearbyItems.slice(0, 8)].map((r) => ({ lng: r.lng, lat: r.lat })), mapPad());
 }
 function pickNearby(i) {
   const r = nearbyItems[i];
   if (!r) return;
   if (state.picking) return assignStop(state.picking, toStop({ ...r, kind: 'poi' }));
-  showPlace(toStop({ ...r, kind: 'poi' }), { addr: [r.address, r.openTime].filter(Boolean).join(' · '), zoom: 16, rows: [r.tel ? ['電話', esc(r.tel)] : null, ['座標', `${r.lat.toFixed(5)}, ${r.lng.toFixed(5)}`]] });
+  suppressArea();
+  showPlace(toStop({ ...r, kind: 'poi' }), { addr: r.address || '', zoom: 16, data: r });
 }
 document.querySelectorAll('#nearby-grid [data-kind]').forEach((b) => b.addEventListener('click', () => runNearby(b.dataset.kind)));
 const closeNearby = () => {

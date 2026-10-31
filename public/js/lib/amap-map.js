@@ -51,7 +51,9 @@ export function createMapView(AMap, el, opts = {}) {
     pitch: 0,
     rotation: 0,
     resizeEnable: true,
-    showBuildingBlock: true, // 標準圖層可顯示；衛星／地形會用 setFeatures 關掉
+    // 一律 false：showBuildingBlock 只在「建構地圖時」生效（setStatus/setFeatures 在 3D 模式關不掉預設的 AMap.Buildings 白色樓塊，
+    // 這就是衛星傾斜出現白樓的根因）。標準／大眾運輸的 3D 樓塊改由我們自己管理的 AMap.Buildings 圖層提供，衛星類模式則移除。
+    showBuildingBlock: false,
     showLabel: true,
     rotateEnable: true,
     pitchEnable: true,
@@ -61,7 +63,7 @@ export function createMapView(AMap, el, opts = {}) {
     features: ['bg', 'point', 'road', 'building'],
   });
 
-  const state = { mode: 'standard', labels: true, satSource: 'amap', dark: !!opts.dark, overlay: [] };
+  const state = { mode: 'standard', labels: true, satSource: 'amap', terrainSource: 'tianditu', dark: !!opts.dark, overlay: [], buildings: null };
   const layers = {};
   const make = (name, fn) => (layers[name] ??= fn());
 
@@ -109,6 +111,12 @@ export function createMapView(AMap, el, opts = {}) {
     if (Date.now() < suppressUntil) return;
     emit('tap', { ...fromLngLat(e.lnglat), px: { x: e.pixel?.x, y: e.pixel?.y } });
   });
+  // 圖資載入完成／縮放後再確認一次樓塊政策（衛星類模式不得有白樓）
+  const enforceBuildings = () => {
+    if (isImageryMode(state.mode) && buildingLayerCount() > 0) applyBuildingPolicy(state.mode);
+  };
+  map.on('complete', enforceBuildings);
+  map.on('zoomend', enforceBuildings);
   for (const ev of ['moveend', 'zoomend', 'dragstart']) map.on(ev, () => emit(ev === 'dragstart' ? 'dragstart' : 'viewchange', {}));
 
   // ── 圖層
@@ -135,31 +143,42 @@ export function createMapView(AMap, el, opts = {}) {
         if (labels) set.push(make('roadnet', () => new AMap.TileLayer.RoadNet({ zIndex: 3 })));
       }
     }
-    if (mode === 'terrain' && opts.tianditu?.tk && opts.createTianditu) {
+    if (mode === 'terrain' && state.terrainSource === 'google' && opts.google?.key && opts.createGoogleTerrain) {
+      // Google 地形已含道路與地名（layerRoadmap），不再疊天地圖注記
+      set.push(make('googleTerrain', () => opts.createGoogleTerrain(AMap)));
+    } else if (mode === 'terrain' && opts.tianditu?.tk && opts.createTianditu) {
       set.push(tdt('terrain'));
       if (labels) set.push(tdt('terrainLabels'));
     }
     if (mode === 'landcover' && opts.createLandcover) set.push(make('worldcover', () => opts.createLandcover(AMap)));
     return set;
   }
-  /** Apple Maps 風格：衛星／地形可俯仰，但不顯示白色擠出樓塊；標準圖層保留 3D 樓塊 */
+  /** 白色 3D 樓塊圖層（AMap.Buildings）。只在標準／大眾運輸模式存在；衛星類模式一定移除（可俯仰但沒有白樓） */
+  const isBuildingLayer = (l) => /Buildings/.test(l?.CLASS_NAME || l?.constructor?.name || '');
   function applyBuildingPolicy(mode) {
-    // 與 isImageryMode 對齊：衛星／天地圖／地形／地表覆蓋都不顯示白色 3D 樓塊；仍允許 pitch
     try {
       if (isImageryMode(mode)) {
-        map.setFeatures(['bg']); // 關掉 building／road／point，避免白樓蓋住衛星
-        if (typeof map.setStatus === 'function') map.setStatus({ showBuildingBlock: false });
+        map.setFeatures(['bg']); // 底圖只留背景，不畫 point／road／building
+        if (state.buildings) map.remove(state.buildings);
+        // 保險：不論誰加進來的樓塊圖層（預設圖層、舊版 API），一律拔掉
+        for (const l of map.getLayers?.() ?? []) if (isBuildingLayer(l)) map.remove(l);
       } else {
         map.setFeatures(['bg', 'point', 'road', 'building']);
-        if (typeof map.setStatus === 'function') map.setStatus({ showBuildingBlock: true });
+        if (AMap.Buildings) {
+          state.buildings ??= new AMap.Buildings({ zooms: [16, 20], zIndex: 10, heightFactor: 1 });
+          if (!(map.getLayers?.() ?? []).includes(state.buildings)) map.add(state.buildings);
+        }
       }
     } catch {
-      /* 舊版 JS API 可能沒 setStatus.showBuildingBlock */
+      /* 舊版 JS API 沒有 setFeatures／Buildings 時忽略 */
     }
   }
+  /** 目前地圖上的樓塊圖層數（測試與除錯用；衛星類模式必須為 0） */
+  const buildingLayerCount = () => (map.getLayers?.() ?? []).filter(isBuildingLayer).length;
   function setLayerMode(mode, extra = {}) {
     if (!LAYER_MODES.includes(mode)) throw new Error(`unknown layer mode ${mode}`);
     if (extra.satSource && !SAT_SOURCES.includes(extra.satSource)) throw new Error(`unknown sat source ${extra.satSource}`);
+    if (extra.terrainSource && !['google', 'tianditu'].includes(extra.terrainSource)) throw new Error(`unknown terrain source ${extra.terrainSource}`);
     Object.assign(state, { mode }, extra);
     const want = new Set(layerSet());
     for (const l of state.overlay) if (!want.has(l)) map.remove(l);
@@ -168,6 +187,7 @@ export function createMapView(AMap, el, opts = {}) {
     const sat = mode === 'satellite' || mode === 'tianditu';
     map.setMapStyle(state.dark ? 'amap://styles/dark' : mode === 'transit' || mode === 'landcover' || mode === 'terrain' ? 'amap://styles/light' : 'amap://styles/normal');
     applyBuildingPolicy(mode);
+    el.dataset.buildings = isImageryMode(mode) ? 'off' : 'on';
     el.dataset.layer = sat || mode === 'terrain' ? (mode === 'terrain' ? 'terrain' : 'satellite') : mode;
   }
   function setDark(dark) {
@@ -296,6 +316,8 @@ export function createMapView(AMap, el, opts = {}) {
     if (y < top || y > el.clientHeight - bottom || x < 20 || x > el.clientWidth - 20) flyTo(p, map.getZoom(), pad);
   }
 
+  applyBuildingPolicy('standard');
+
   return {
     map,
     AMap,
@@ -311,6 +333,7 @@ export function createMapView(AMap, el, opts = {}) {
     setPitch: (deg) => map.setPitch?.(deg, false),
     resetNorth: () => map.setRotation?.(0, false),
     setLayerMode,
+    buildingLayerCount,
     setDark,
     fit,
     flyTo,

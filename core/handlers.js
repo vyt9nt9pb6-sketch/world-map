@@ -13,6 +13,7 @@ import {
   validateNearby,
   validateRegeo,
   validateEnvironment,
+  validatePlace,
   ROUTE_STRATEGIES,
   TRANSIT_STRATEGIES,
   NEARBY_TYPES,
@@ -25,7 +26,11 @@ import {
   mapPathRouteResponse,
   mapTransitResponse,
   mapRegeoResponse,
+  mapDrivingV3Response,
+  mapPlaceDetail,
+  parseLocation,
 } from './mapping.js';
+import { planCalls, mergeRoutes, decorate, haversine } from './driving.js';
 import { HttpError, json, errorResponse } from './http.js';
 import { createRailMatcher } from './rail.js';
 import railData from './rail-data.js';
@@ -39,6 +44,8 @@ const UPSTREAM_TIMEOUT_MS = 10000;
 const UPSTREAM_PATHS = new Set([
   '/v5/place/around',
   '/v5/place/text',
+  '/v5/place/detail',
+  '/v3/direction/driving',
   '/v3/geocode/geo',
   '/v3/geocode/regeo',
   '/v5/direction/driving',
@@ -113,16 +120,17 @@ export async function callAmap(path, query, env, fetchImpl = fetch) {
 
 export async function handleSearch(params, env, fetchImpl) {
   const v = validateSearch(params);
-  const common = { keywords: v.keywords, page_size: 20, page_num: v.page, show_fields: 'business' };
+  const common = { keywords: v.keywords, page_size: 20, page_num: v.page, show_fields: 'business,photos' };
   // 有地圖中心時：先查中心 50 公里內（依權重排序），找不到再退回城市／全國關鍵字搜尋
   if (v.location) {
     const around = await callAmap(
       '/v5/place/around',
-      { ...common, location: v.location, radius: 50000, sortrule: 'weight' },
+      { ...common, location: v.location, radius: v.radius, sortrule: 'weight' },
       env,
       fetchImpl,
     );
     const mapped = mapSearchResponse(around, 'around');
+    if (v.area) return { ...mapped, area: true, radius: v.radius }; // 範圍搜尋：只看這個區域，不退回全國搜尋
     // 附近結果的名稱都不包含完整關鍵字（例如在連雲港搜「南京站」只會找到「…南收費站」），
     // 代表使用者要找的是特定的遠方地點 → 改用全國關鍵字搜尋（依相關度排序）。
     const q = v.keywords.replace(/\s+/g, '');
@@ -181,25 +189,70 @@ export function attachRailLines(route, matcher = getRailMatcher()) {
   return route;
 }
 
+/** unix 秒 → 高德公交要的出發日期／時間（中國標準時間 UTC+8） */
+export function shanghaiDateTime(sec) {
+  const d = new Date((sec + 8 * 3600) * 1000);
+  const p = (n) => String(n).padStart(2, '0');
+  return { date: `${d.getUTCFullYear()}-${p(d.getUTCMonth() + 1)}-${p(d.getUTCDate())}`, time: `${p(d.getUTCHours())}:${p(d.getUTCMinutes())}` };
+}
+
+/**
+ * 駕車：多條候選路線（v5＋v3 合併）。
+ * 出發時間：高德「預測出發時間路況」(/v4/etd/driving) 官方文件標明只開放企業開發者，個人金鑰不能用，
+ * 所以駕車一律以「目前即時路況」估時；若使用者設定了出發時間，回傳 depart.supported=false 讓前端老實標示，
+ * 並由前端用「出發時間＋行駛時間」顯示預計抵達時刻。
+ */
+export async function handleDriving(v, env, fetchImpl) {
+  const calls = planCalls({ avoidHighway: v.avoidHighway, avoidToll: v.avoidToll, strategy: v.strategy });
+  const wp = v.waypoints.length ? v.waypoints.join(';') : undefined;
+  const run = ([ver, st]) =>
+    ver === 'v5'
+      ? callAmap(
+          '/v5/direction/driving',
+          { origin: v.origin, destination: v.destination, waypoints: wp, strategy: st, origin_id: v.originId, destination_id: v.destinationId, show_fields: 'cost,polyline' },
+          env,
+          fetchImpl,
+        ).then((b) => mapRouteResponse(b, v.strategy))
+      : callAmap(
+          '/v3/direction/driving',
+          { origin: v.origin, destination: v.destination, waypoints: wp, strategy: st, originid: v.originId, destinationid: v.destinationId, extensions: 'all' },
+          env,
+          fetchImpl,
+        ).then((b) => mapDrivingV3Response(b));
+  const settled = await Promise.allSettled(calls.map(run));
+  const ok = settled.filter((x) => x.status === 'fulfilled').map((x) => x.value);
+  if (!ok.length) throw settled[0].reason;
+  // 保持呼叫順序（第一組＝推薦）
+  const groups = settled.map((x) => (x.status === 'fulfilled' ? x.value : { routes: [] }));
+  const merged = mergeRoutes(groups, { avoidToll: v.avoidToll });
+  if (!merged.length) throw new UpstreamError(422, 'no_route', '無法規劃這條路線，請換個起點或終點');
+  const o = parseLocation(v.origin);
+  const d = parseLocation(v.destination);
+  const straight = o && d ? haversine(o, d) : 0;
+  const out = {
+    mode: 'driving',
+    strategy: v.strategy,
+    taxiCost: ok.find((g) => g.taxiCost != null)?.taxiCost ?? null,
+    straightDistance: straight,
+    options: { avoidHighway: v.avoidHighway, avoidToll: v.avoidToll },
+    routes: decorate(merged, straight),
+  };
+  if (merged.tollNote) out.tollNote = merged.tollNote;
+  if (v.depart) out.depart = { at: v.depart, mode: 'live', supported: false };
+  return out;
+}
+
+export async function handlePlace(params, env, fetchImpl) {
+  const v = validatePlace(params);
+  const body = await callAmap('/v5/place/detail', { id: v.id, show_fields: 'business,photos' }, env, fetchImpl);
+  const place = mapPlaceDetail(body);
+  if (!place) throw new UpstreamError(404, 'not_found', '找不到這個地點的詳細資料');
+  return { place };
+}
+
 export async function handleRoute(params, env, fetchImpl) {
   const v = validateRoute(params);
-  if (v.mode === 'driving') {
-    const body = await callAmap(
-      '/v5/direction/driving',
-      {
-        origin: v.origin,
-        destination: v.destination,
-        waypoints: v.waypoints.length ? v.waypoints.join(';') : undefined,
-        strategy: ROUTE_STRATEGIES[v.strategy],
-        origin_id: v.originId,
-        destination_id: v.destinationId,
-        show_fields: 'cost,polyline',
-      },
-      env,
-      fetchImpl,
-    );
-    return { mode: 'driving', ...mapRouteResponse(body, v.strategy) };
-  }
+  if (v.mode === 'driving') return handleDriving(v, env, fetchImpl);
   if (v.mode === 'transit') {
     const [city1, city2] = await Promise.all([
       v.city1 ?? cityOf(v.origin, env, fetchImpl),
@@ -214,11 +267,13 @@ export async function handleRoute(params, env, fetchImpl) {
       AlternativeRoute: 4,
       extensions: 'all',
       show_fields: 'cost,polyline',
+      ...(v.depart ? shanghaiDateTime(v.depart) : {}),
     });
     if (v.strategy === 'rail_first') return railFirstTransit(query, env, fetchImpl);
     const body = await callAmap('/v5/direction/transit/integrated', query(TRANSIT_STRATEGIES[v.strategy]), env, fetchImpl);
     const out = mapTransitResponse(body);
     out.routes.forEach((r) => attachRailLines(r));
+    if (v.depart) out.depart = { at: v.depart, mode: 'transit', supported: true };
     return out;
   }
   // walking / bicycling / electrobike
@@ -359,6 +414,7 @@ const ROUTES = {
   '/api/geocode': { GET: data(handleGeocode) },
   '/api/route': { GET: data(handleRoute) },
   '/api/nearby': { GET: data(handleNearby) },
+  '/api/place': { GET: data(handlePlace) },
   '/api/regeo': { GET: data(handleRegeo) },
   '/api/environment': { GET: raw(handleEnvironment) },
   '/api/rail-lines': { GET: raw(handleRailLines) },

@@ -69,12 +69,12 @@ export const TIANDITU_ATTRIBUTION = '© 天地圖 · 國家地理信息公共服
  * 產生一個 GCJ 圖磚 (x,y,z) 的 canvas（把需要的 WGS 圖磚平移後畫上去）。
  * load(z,x,y) → Promise<HTMLImageElement|null>；回傳 Promise<canvas|null>（全部載入失敗 → null）。
  */
-export async function renderTile(x, y, z, load, doc = document) {
+export async function renderTile(x, y, z, load, doc = document, shift = true) {
   const canvas = doc.createElement('canvas');
   canvas.width = canvas.height = TILE;
   const ctx = canvas.getContext('2d');
   const oks = await Promise.all(
-    coveringTiles(x, y, z).map(async (t) => {
+    (shift ? coveringTiles(x, y, z) : [{ tx: x, ty: y, dx: 0, dy: 0 }]).map(async (t) => {
       const img = await load(z, t.tx, t.ty);
       if (img) ctx.drawImage(img, t.dx, t.dy, TILE, TILE);
       return !!img;
@@ -95,7 +95,7 @@ export function tileIsShifted(x, y, z) {
  * 中國境內平移對齊高德 GCJ-02；境外高德座標＝WGS-84，不平移。
  * urlFor(z,x,y) → 圖磚網址。天地圖影像／注記與 ESA WorldCover 共用。
  */
-export function createShiftedFlexible(AMap, { urlFor, zIndex = 3, opacity = 1, dataZooms = [3, 18], zooms = [3, 20] }) {
+export function createShiftedFlexible(AMap, { urlFor, zIndex = 3, opacity = 1, dataZooms = [3, 18], zooms = [3, 20], shift = true }) {
   const mem = new Map(); // 僅瀏覽器記憶體內的小型暫存：相鄰 GCJ 圖磚重複使用同一批 WGS 圖磚
   const load = (z, x, y) => {
     const key = `${z}/${x}/${y}`;
@@ -121,7 +121,7 @@ export function createShiftedFlexible(AMap, { urlFor, zIndex = 3, opacity = 1, d
     dataZooms,
     zooms,
     createTile(x, y, z, success, fail) {
-      renderTile(x, y, z, load).then((c) => (c ? success(c) : fail()), () => fail());
+      renderTile(x, y, z, load, document, shift).then((c) => (c ? success(c) : fail()), () => fail());
     },
   });
 }

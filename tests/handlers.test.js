@@ -80,15 +80,22 @@ test('geocode：30001（不是地址）視為沒有結果', async () => {
   assert.deepEqual(await res.json(), { results: [] });
 });
 
-test('route：參數對應到 v5 driving', async () => {
-  const f = fakeFetch(() => ({ infocode: '10000', route: { paths: [] } }));
-  const res = await handleApiRequest(req('/api/route?origin=119.2,34.5&destination=118.7,32&waypoints=119,33&strategy=avoid_tolls'), env, { fetchImpl: f });
+test('route：參數對應到 v5 driving（避開收費 → v5 strategy 1／36 ＋ v3 14）', async () => {
+  const path = { distance: '1000', cost: { duration: '100' }, steps: [{ polyline: '119,34;119.1,34.1' }] };
+  const f = fakeFetch((u) =>
+    u.pathname === '/v3/direction/driving'
+      ? { status: '1', infocode: '10000', route: { paths: [] } }
+      : { infocode: '10000', route: { paths: [path] } },
+  );
+  const res = await handleApiRequest(req('/api/route?origin=119.2,34.5&destination=118.7,32&waypoints=119,33&avoid_toll=1'), env, { fetchImpl: f });
   assert.equal(res.status, 200);
-  const u = f.calls[0];
-  assert.equal(u.pathname, '/v5/direction/driving');
-  assert.equal(u.searchParams.get('strategy'), '1');
-  assert.equal(u.searchParams.get('waypoints'), '119,33');
-  assert.equal(u.searchParams.get('show_fields'), 'cost,polyline');
+  const v5 = f.calls.filter((u) => u.pathname === '/v5/direction/driving');
+  assert.deepEqual(v5.map((u) => u.searchParams.get('strategy')).sort(), ['1', '36']);
+  assert.equal(v5[0].searchParams.get('waypoints'), '119,33');
+  assert.equal(v5[0].searchParams.get('show_fields'), 'cost,polyline');
+  const v3 = f.calls.find((u) => u.pathname === '/v3/direction/driving');
+  assert.equal(v3.searchParams.get('strategy'), '14');
+  assert.equal(v3.searchParams.get('extensions'), 'all');
 });
 
 test('驗證錯誤 → 400，不呼叫上游', async () => {

@@ -81,13 +81,25 @@ export async function createGoogleTileSession(ctx) {
   const { env, fetchImpl } = ctx;
   const key = (env?.GOOGLE_MAPS_TILE_KEY || '').trim();
   if (!key) throw new HttpError(404, 'not_enabled', 'Google 衛星圖層尚未啟用');
+  // 圖磚類型：satellite（預設）或 terrain（地形＋道路地名）。Google 規定 terrain 必須同時要求 layerRoadmap。
+  let type = 'satellite';
+  try {
+    const b = await ctx.request.clone().json();
+    if (b && b.type === 'terrain') type = 'terrain';
+  } catch {
+    /* 沒有 body → 衛星 */
+  }
+  const sessionBody =
+    type === 'terrain'
+      ? { mapType: 'terrain', language: 'zh-CN', region: 'CN', layerTypes: ['layerRoadmap'] }
+      : { mapType: 'satellite', language: 'zh-CN', region: 'CN' };
   const up = `https://tile.googleapis.com/v1/createSession?key=${encodeURIComponent(key)}`;
   let res;
   try {
     res = await (fetchImpl ?? fetch)(up, {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
-      body: JSON.stringify({ mapType: 'satellite', language: 'zh-CN', region: 'CN' }),
+      body: JSON.stringify(sessionBody),
       signal: AbortSignal.timeout(12000),
     });
   } catch {
@@ -103,5 +115,5 @@ export async function createGoogleTileSession(ctx) {
   }
   if (!data.session) throw new HttpError(502, 'upstream_error', 'Google session 缺少 token');
   // 不把 API key 再塞進回應（前端已從 /api/config 取得）；只回 session／expiry
-  return jsonNoStore({ session: data.session, expiry: data.expiry, tileWidth: data.tileWidth, tileHeight: data.tileHeight });
+  return jsonNoStore({ type, session: data.session, expiry: data.expiry, tileWidth: data.tileWidth, tileHeight: data.tileHeight });
 }

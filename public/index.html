@@ -15,6 +15,7 @@
     <link rel="icon" href="/icons/icon.svg" type="image/svg+xml" />
     <link rel="apple-touch-icon" href="/icons/icon-180.png" />
     <link rel="stylesheet" href="/css/app.css" />
+    <link rel="stylesheet" href="/css/glass.css" />
   </head>
   <body>
     <!-- 圖示（同一張 sprite） -->
@@ -32,6 +33,7 @@
       <symbol id="i-person" viewBox="0 0 24 24"><circle cx="12" cy="8.6" r="4.1" fill="currentColor"/><path fill="currentColor" d="M3.6 22c0-4.6 3.8-7.4 8.4-7.4s8.4 2.8 8.4 7.4z"/></symbol>
       <symbol id="i-pin" viewBox="0 0 24 24"><path fill="currentColor" d="M12 2a7 7 0 0 0-7 7c0 5.2 7 13 7 13s7-7.8 7-13a7 7 0 0 0-7-7Zm0 9.5A2.5 2.5 0 1 1 12 6.5a2.5 2.5 0 0 1 0 5Z"/></symbol>
       <symbol id="i-trash" viewBox="0 0 24 24"><path fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" d="M4 7h16M9 7V4h6v3m-8 0 1 13h8l1-13"/></symbol>
+      <symbol id="i-phone" viewBox="0 0 24 24"><path fill="currentColor" d="M6.6 10.8a15.1 15.1 0 0 0 6.6 6.6l2.2-2.2c.3-.3.7-.4 1-.2 1.1.4 2.3.6 3.6.6.6 0 1 .4 1 1V20c0 .6-.4 1-1 1A17 17 0 0 1 3 4c0-.6.4-1 1-1h3.5c.6 0 1 .4 1 1 0 1.300.2 2.500.6 3.600.1.300 0 .700-.2 1l-2.300 2.200Z"/></symbol>
       <symbol id="i-swap" viewBox="0 0 24 24"><path fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="M8 4v14m0 0-3-3m3 3 3-3M16 20V6m0 0-3 3m3-3 3 3"/></symbol>
     </svg>
 
@@ -57,6 +59,7 @@
     </div>
 
     <!-- 比例尺（左下，面板之上） -->
+    <button type="button" id="area-btn" class="area-btn hidden"><svg class="ic"><use href="#i-search" /></svg><span>搜尋此區域</span></button>
     <div class="map-attrib" id="map-attrib" aria-hidden="true"></div>
     <div class="scale" id="scale" aria-hidden="true"><div class="scale-bar" id="scale-bar"></div><span id="scale-label"></span></div>
 
@@ -85,6 +88,10 @@
         </div>
 
         <div id="search-home" class="scroll">
+          <button type="button" id="area-suggest" class="suggest-row hidden">
+            <span class="ico blue"><svg><use href="#i-search" /></svg></span>
+            <span class="body"><span class="name" id="area-suggest-name"></span><span class="sub">依目前地圖範圍搜尋，拖曳或縮放地圖時自動更新</span></span>
+          </button>
           <section class="block" aria-labelledby="h-nearby">
             <h3 id="h-nearby">搜尋附近</h3>
             <div class="nearby-grid" id="nearby-grid">
@@ -103,24 +110,31 @@
           </section>
         </div>
         <div id="search-results" class="scroll hidden">
+          <div class="results-tools">
+            <button type="button" id="btn-area-mode" class="chip" aria-pressed="false"><svg class="ic"><use href="#i-search" /></svg><span>搜尋附近・跟著地圖更新</span></button>
+          </div>
           <div id="search-status" class="status" role="status" aria-live="polite"></div>
           <ul id="results" class="list card"></ul>
         </div>
         <p class="credits">地圖 © 高德地圖；鐵路線路 © <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap contributors</a>（ODbL）；氣象資料 <a href="https://open-meteo.com/" target="_blank" rel="noopener">Open-Meteo</a>（CC BY 4.0）</p>
       </div>
 
-      <!-- 地點卡 -->
+      <!-- 地點卡（Apple 地圖風格） -->
       <div id="view-place" class="view hidden">
         <div class="drag-zone peek-block place-head">
           <div class="place-title">
             <h2 id="place-name"></h2>
+            <p id="place-sub" class="place-sub hidden"></p>
             <p id="place-addr" class="muted"></p>
           </div>
           <button type="button" id="place-close" class="round-x" aria-label="關閉"><svg><use href="#i-close" /></svg></button>
         </div>
         <div class="scroll">
-          <div class="action-row">
+          <div id="place-photos" class="photo-strip hidden" aria-label="照片"></div>
+          <div id="place-badges" class="badges hidden"></div>
+          <div class="action-row four">
             <button type="button" id="place-route" class="act primary"><svg><use href="#i-route" /></svg><span>路線</span></button>
+            <button type="button" id="place-call" class="act hidden"><svg><use href="#i-phone" /></svg><span>電話</span></button>
             <button type="button" id="place-fav" class="act" aria-pressed="false"><svg><use href="#i-star" /></svg><span>收藏</span></button>
             <button type="button" id="place-share" class="act"><svg><use href="#i-share" /></svg><span>分享</span></button>
           </div>
@@ -149,8 +163,20 @@
             <button type="button" id="btn-add-via" class="link-btn">＋ 途經點</button>
             <button type="button" id="btn-swap" class="link-btn"><svg class="ic"><use href="#i-swap" /></svg> 起終點互換</button>
           </div>
+          <details class="card route-opts hidden" id="route-opts">
+            <summary><span>路線選項</span><em id="route-opts-sum">現在出發</em></summary>
+            <div class="seg-ctl depart" id="depart-seg" role="radiogroup" aria-label="出發時間">
+              <button type="button" role="radio" data-d="now" aria-checked="true">現在出發</button>
+              <button type="button" role="radio" data-d="at" aria-checked="false">設定出發時間</button>
+            </div>
+            <input type="datetime-local" id="depart-input" class="hidden" aria-label="出發時間" />
+            <label class="switch-row" id="row-avoid-hw"><span>避開高速公路</span><input type="checkbox" role="switch" id="opt-avoid-hw" /><i class="tgl" aria-hidden="true"></i></label>
+            <label class="switch-row" id="row-avoid-toll"><span>避開收費站</span><input type="checkbox" role="switch" id="opt-avoid-toll" /><i class="tgl" aria-hidden="true"></i></label>
+          </details>
           <div class="chips" id="strategy-chips" role="radiogroup" aria-label="路線偏好"></div>
+          <div class="chips hidden" id="route-quick" role="group" aria-label="快速選擇路線"></div>
           <div id="route-status" class="status" role="status" aria-live="polite"></div>
+          <p id="route-depart-note" class="muted small hidden"></p>
           <ul id="route-options" class="route-options"></ul>
           <div id="nav-buttons" class="action-row hidden">
             <button type="button" class="act primary wide" id="nav-amap"><span>高德地圖導航</span></button>
@@ -229,19 +255,19 @@
           <button type="button" id="layer-close" class="round-x" aria-label="關閉"><svg><use href="#i-close" /></svg></button>
         </div>
         <div class="layer-cards" id="layer-cards" role="radiogroup" aria-label="地圖類型">
-          <button type="button" class="layer-card" role="radio" data-layer="standard" aria-checked="true"><i class="thumb thumb-standard"></i><span>標準</span></button>
-          <button type="button" class="layer-card" role="radio" data-layer="satellite" aria-checked="false"><i class="thumb thumb-satellite"></i><span>衛星</span></button>
-          <button type="button" class="layer-card" role="radio" data-layer="terrain" aria-checked="false"><i class="thumb thumb-terrain"></i><span>地形</span></button>
-          <button type="button" class="layer-card" role="radio" data-layer="transit" aria-checked="false"><i class="thumb thumb-transit"></i><span>大眾運輸</span></button>
+          <button type="button" class="layer-card" role="radio" data-layer="standard" aria-checked="true"><span class="thumb"><img src="/img/layer-standard.svg" alt="" width="200" height="140" decoding="async" /></span><span class="lbl">標準</span></button>
+          <button type="button" class="layer-card" role="radio" data-layer="satellite" aria-checked="false"><span class="thumb"><img src="/img/layer-satellite.svg" alt="" width="200" height="140" decoding="async" /></span><span class="lbl">衛星</span></button>
+          <button type="button" class="layer-card" role="radio" data-layer="terrain" aria-checked="false"><span class="thumb"><img src="/img/layer-terrain.svg" alt="" width="200" height="140" decoding="async" /></span><span class="lbl">地形</span></button>
+          <button type="button" class="layer-card" role="radio" data-layer="transit" aria-checked="false"><span class="thumb"><img src="/img/layer-transit.svg" alt="" width="200" height="140" decoding="async" /></span><span class="lbl">大眾運輸</span></button>
         </div>
         <div class="card layer-opts">
-          <div class="opt-row" id="opt-source">
-            <span>衛星來源</span>
-            <div class="seg-ctl wrap" role="radiogroup">
-              <button type="button" role="radio" data-source="amap" aria-checked="true">高德</button>
-              <button type="button" role="radio" data-source="tianditu" aria-checked="false" id="src-tianditu">天地圖</button>
-              <button type="button" role="radio" data-source="mapbox" aria-checked="false" id="src-mapbox" disabled title="尚未設定 MAPBOX_TOKEN">Mapbox</button>
-              <button type="button" role="radio" data-source="google" aria-checked="false" id="src-google" disabled title="尚未設定 GOOGLE_MAPS_TILE_KEY">Google</button>
+          <div class="opt-block" id="opt-source">
+            <span class="opt-title">衛星來源</span>
+            <div class="src-grid" role="radiogroup" aria-label="衛星來源">
+              <button type="button" role="radio" data-source="amap" aria-checked="true"><b>高德</b><small>預設・最清晰</small></button>
+              <button type="button" role="radio" data-source="tianditu" aria-checked="false" id="src-tianditu"><b>天地圖</b><small>全球影像</small></button>
+              <button type="button" role="radio" data-source="mapbox" aria-checked="false" id="src-mapbox" disabled title="尚未設定 MAPBOX_TOKEN"><b>Mapbox</b><small>需 VPN</small></button>
+              <button type="button" role="radio" data-source="google" aria-checked="false" id="src-google" disabled title="尚未設定 GOOGLE_MAPS_TILE_KEY"><b>Google</b><small>需 VPN</small></button>
             </div>
           </div>
           <p id="opt-sat-vpn-note" class="muted small hidden">Mapbox／Google 衛星在中國大陸常需 VPN 才能載入圖磚。</p>
@@ -252,8 +278,8 @@
           <div class="opt-row" id="opt-transit-note">
             <span class="muted small">大眾運輸圖層：淡化底圖，疊上全國鐵路線與車站（OpenStreetMap，示意用）。</span>
           </div>
-          <div class="opt-row" id="opt-terrain-note" class="hidden">
-            <span class="muted small">地形圖：天地圖地形暈渲（ter_w）＋注記（cta_w）。中國境內自動平移對齊高德。</span>
+          <div class="opt-row hidden" id="opt-terrain-note">
+            <span class="muted small" id="terrain-note-text">地形圖：天地圖地形暈渲（ter_w）＋注記（cta_w）。</span>
           </div>
         </div>
         <!-- 全球圖層：天地圖全球衛星、全球地表覆蓋（ESA WorldCover） -->

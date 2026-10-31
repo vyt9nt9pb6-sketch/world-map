@@ -20,7 +20,7 @@ test('validateSearch：必填 q、長度限制、去除控制字元', () => {
   assert.throws(() => validateSearch(P({ q: '   ' })), ValidationError);
   assert.throws(() => validateSearch(P({ q: '加'.repeat(81) })), /太長/);
   const v = validateSearch(P({ q: ' 加油站\n\t ', location: '119.3,34.7', page: '2' }));
-  assert.deepEqual(v, { keywords: '加油站', location: '119.3,34.7', city: undefined, page: 2 });
+  assert.deepEqual(v, { keywords: '加油站', location: '119.3,34.7', city: undefined, page: 2, area: false, radius: 50000 });
   assert.throws(() => validateSearch(P({ q: 'a', page: '0' })), ValidationError);
   assert.throws(() => validateSearch(P({ q: 'a', page: '11' })), ValidationError);
   assert.throws(() => validateSearch(P({ q: 'a', page: '-1' })), ValidationError);
@@ -28,7 +28,7 @@ test('validateSearch：必填 q、長度限制、去除控制字元', () => {
 
 test('validateSearch：不在白名單的參數不會被帶出去', () => {
   const v = validateSearch(P({ q: 'a', key: 'evil', output: 'xml', callback: 'x' }));
-  assert.deepEqual(Object.keys(v).sort(), ['city', 'keywords', 'location', 'page']);
+  assert.deepEqual(Object.keys(v).sort(), ['area', 'city', 'keywords', 'location', 'page', 'radius']);
 });
 
 test('validateGeocode', () => {

@@ -16,9 +16,43 @@ export function parseLocation(s) {
   return { lng: Number(m[1]), lat: Number(m[2]) };
 }
 
+/** 高德圖片網址常是 http：統一升成 https（本站 CSP 只允許 https 的 amap／autonavi 圖片） */
+export function httpsUrl(u) {
+  const t = str(u).trim();
+  if (!t) return '';
+  if (t.startsWith('//')) return `https:${t}`;
+  if (t.startsWith('http://')) return `https://${t.slice(7)}`;
+  return t.startsWith('https://') ? t : '';
+}
+
+/** 多個電話以 ; 分隔，去重後取前 3 個 */
+export function splitTels(v) {
+  const seen = new Set();
+  const out = [];
+  for (const x of str(v).split(/[;；,，]/)) {
+    const t = x.trim();
+    if (t && !seen.has(t)) {
+      seen.add(t);
+      out.push(t);
+    }
+  }
+  return out.slice(0, 3);
+}
+
+function mapPhotos(p, max = 8) {
+  const list = Array.isArray(p?.photos) ? p.photos : [];
+  return list
+    .map((x) => ({ title: str(x?.title), url: httpsUrl(x?.url) }))
+    .filter((x) => x.url)
+    .slice(0, max);
+}
+
 export function mapPoi(p) {
   const loc = parseLocation(p.location);
   if (!loc) return null;
+  const biz = p.business && typeof p.business === 'object' ? p.business : {};
+  const tels = splitTels(biz.tel ?? p.tel);
+  const photos = mapPhotos(p, 1);
   return {
     kind: 'poi',
     id: str(p.id) || null,
@@ -30,9 +64,32 @@ export function mapPoi(p) {
     district: str(p.adname),
     adcode: str(p.adcode),
     distance: num(p.distance),
-    tel: str(p.business?.tel ?? p.tel) || null,
+    tel: tels[0] || null,
+    rating: num(biz.rating),
+    cost: num(biz.cost),
+    openToday: str(biz.opentime_today) || null,
+    photo: photos[0]?.url || null,
     lng: loc.lng,
     lat: loc.lat,
+  };
+}
+
+/** /v5/place/detail：完整地點資料（營業時間、評分、人均、照片…；欄位依商家類型而定，沒有就是 null） */
+export function mapPlaceDetail(json) {
+  const p = Array.isArray(json?.pois) ? json.pois[0] : null;
+  if (!p) return null;
+  const base = mapPoi(p);
+  if (!base) return null;
+  const biz = p.business && typeof p.business === 'object' ? p.business : {};
+  return {
+    ...base,
+    tels: splitTels(biz.tel ?? p.tel),
+    openWeek: str(biz.opentime_week) || null,
+    businessArea: str(biz.business_area) || null,
+    tag: str(biz.tag) || null,
+    alias: str(biz.alias) || null,
+    parking: str(biz.parking_type) || null,
+    photos: mapPhotos(p, 8),
   };
 }
 
@@ -126,6 +183,43 @@ export function mapRouteResponse(json, strategy) {
           distance: num(s.step_distance),
           duration: num(s.cost?.duration),
         })),
+        polyline: coords,
+      };
+    }),
+  };
+}
+
+/** v3 /v3/direction/driving（extensions=all）→ 與 v5 路線相同的精簡格式 */
+export function mapDrivingV3Response(json) {
+  const paths = Array.isArray(json?.route?.paths) ? json.route.paths : [];
+  return {
+    taxiCost: num(json?.route?.taxi_cost),
+    routes: paths.map((p, idx) => {
+      const steps = Array.isArray(p.steps) ? p.steps : [];
+      const coords = [];
+      for (const st of steps) {
+        const pts = decodePolyline(st.polyline);
+        if (coords.length && pts.length && coords[coords.length - 1][0] === pts[0][0] && coords[coords.length - 1][1] === pts[0][1]) pts.shift();
+        for (const pt of pts) coords.push(pt);
+      }
+      const roadLen = new Map();
+      for (const st of steps) {
+        const r = str(st.road);
+        if (!r) continue;
+        const prev = roadLen.get(r);
+        roadLen.set(r, { order: prev ? prev.order : roadLen.size, len: (prev ? prev.len : 0) + (num(st.distance) || 0) });
+      }
+      const roads = [...roadLen.entries()].sort((a, b) => b[1].len - a[1].len).slice(0, 8).sort((a, b) => a[1].order - b[1].order).map(([n]) => n);
+      return {
+        index: idx,
+        distance: num(p.distance),
+        duration: num(p.duration),
+        tolls: num(p.tolls),
+        tollDistance: num(p.toll_distance),
+        trafficLights: num(p.traffic_lights),
+        restriction: str(p.restriction) === '1',
+        roads,
+        steps: steps.map((st) => ({ instruction: str(st.instruction), road: str(st.road), distance: num(st.distance), duration: null })),
         polyline: coords,
       };
     }),
