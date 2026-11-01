@@ -145,8 +145,24 @@ window.WorldMapEnv.registerProvider({
 
 高德 `showBuildingBlock`／`features` 含 `building` 時，衛星圖上會疊白色擠出樓塊。做法：衛星／天地圖衛星／地形模式下 `setFeatures(['bg'])` 並嘗試關閉 building block；**標準圖層保留 3D 樓塊**；俯仰（pitch）仍可用（Apple Maps 風格）。
 
+### v4.1（2026-10-31）：大眾運輸圖層、鍵盤與圖層選單
+**1. 大眾運輸圖層改成「城市軌道」。** 只畫地鐵、輕軌、單軌與磁浮，依各線官方顏色上色，有車站圓點（轉乘站黑框）與站名；不再畫全國國鐵／高鐵線（路線結果裡的火車段名稱沿用原本的鐵路資料，不受影響）。
+- 寫程式前先調查（先搜現成開源專案、看授權）：
+  - 高德 JS API 2.0 沒有地鐵圖層；「地鐵圖」JS API 是示意圖（非地理座標）且要購買授權 → 不用。
+  - subway.amap.com 的 JSON 是高德專有資料，沒有再利用授權 → 不用（也不該爬）。
+  - OpenRailwayMap 圖磚：使用條款禁止大量／自動化存取，且畫的是所有鐵路 → 不用。
+  - GitHub 上的地鐵資料集（CPTOND、AmapMetro、luxueyan、foglet/transit 等）授權不明或已過期 → 只借鑑做法，不抄資料。
+  - **採用 OpenStreetMap（ODbL 1.0）：** OSM 的 `route=subway｜light_rail｜monorail`（磁浮在 OSM 多為 monorail，另加名稱含「磁浮」的 `route=train`）關係，經 Overpass 取得，許可證明確（要標示 © OpenStreetMap contributors，已放在面板與圖層說明）。
+- 做法：`node scripts/build-metro-lines.mjs`（Overpass，快取在 `.run/metro-cache`）→ 依「網路＋線路 ref」合併兩個方向、串成長折線、Douglas-Peucker 簡化（8 m）、轉 GCJ-02（與高德底圖對齊）、站點只留離線路 150 m 內的 → 依 2° 地理格子切成 gzip 小檔 `public/data/metro/*.json.gz`（49 格、428 條線、約 8 千站，**合計約 350 KB**）。網頁只抓畫面附近的格子，用 `DecompressionStream` 解壓（iOS Safari 16.4+）。
+- 靜態資料隨 Worker 一起部署：**不依賴任何第三方執行期服務**，在中國大陸用 VPN 打開 workers.dev 一樣能用（Overpass 只在建置時用）。
+- 已知限制：OSM 完整度因城市而異；少數線路沒有 colour 標籤時用固定色盤；站名是 OSM 的 name（大陸多為簡體）；要更新資料就重跑建置腳本。
+
+**2. 搜尋框被鍵盤頂出螢幕。** 原因：iOS Safari 開鍵盤時「版面視口」（`innerHeight`）不縮，只有「視覺視口」縮小並被捲動；全高的固定面板貼在版面視口底部，頂端就跑出螢幕上方。修法：用 `window.visualViewport`（`resize`／`scroll`）計算鍵盤高度 → CSS 變數 `--vv-bottom`，鍵盤開啟時面板貼在鍵盤上方、高度不超過可見區（`body.kb-open`），並把被捲動的頁面捲回 0；輸入框字級 17px（≥16px，Safari 不會自動放大）。`scripts/e2e-keyboard.mjs` 以 iPhone 尺寸偽造 visualViewport（含「Safari 把頁面捲 120px」的情況）驗證搜尋框一直在可見範圍；**真機的鍵盤只能在 iPhone 上最終確認**。
+
+**3. 圖層選單縮小。** 2×2 大卡片改成緊湊的橫排小卡（縮圖 64×46、整組 ≈124px，原本 ≈400px），選項列與間距也縮小；衛星模式（選項最多）在 iPhone 12/13 高度（844px）也能全部露出、不必捲動。
+
 ### 取捨與限制
-- 大眾運輸圖層是「示意」：淡化底圖＋OSM 鐵路線與車站（站點連線，不是真實軌道幾何）；公車／地鐵圖層高德沒有公開圖磚。
+- 大眾運輸圖層（v4.1）：淡化底圖＋OSM 城市地鐵／輕軌／磁浮的真實軌道幾何與車站（見 v4.1）；公車／地鐵圖層高德沒有公開圖磚。
 - 天地圖與地表覆蓋現在以 `AMap.TileLayer.Flexible` 疊加（WebGL 需要未被汙染的 canvas，會先嘗試 CORS，失敗改用一般圖片載入）；開發機在海外被天地圖 WAF 擋（418），**無法在這裡驗證**，需在大陸手機實測。
 - 真正的 3D（WebGL）在沒有 GPU 的開發機上會退回 2D 點陣，**只能在真機驗證**。
 - 收藏不再以星號畫在地圖上（照 Kwok 的「不要出現在螢幕上」），只在「我的」清單裡；點收藏項目會在地圖上標出。

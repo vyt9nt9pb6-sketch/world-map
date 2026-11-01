@@ -11,6 +11,7 @@ import { createReachProbe } from './lib/reach.js';
 import { splitTels, telHref, categoryOf, subLine, badgesHtml, photosHtml, infoRows, viewportRadius, movedEnough } from './lib/place-view.js';
 import { drivingCardHtml, routeLabelHtml, midPoint, quickPicks } from './lib/route-view.js';
 import { createWorldCoverFlexible, WORLDCOVER_LEGEND, legendColor, WORLDCOVER_ATTRIBUTION } from './lib/landcover.js';
+import { createMetroLoader, collectStations } from './lib/metro-layer.js';
 import { createStore, findSamePlace } from './lib/favstore.js';
 import { transitSummary, transitDetail, esc } from './lib/transit-view.js';
 import { loadAMap, createMapView } from './lib/amap-map.js';
@@ -133,12 +134,27 @@ const sheetEl = $('sheet');
 function currentViewEl() {
   return $(`view-${state.view}`);
 }
+/* iOS Safari 開鍵盤時：版面視口（innerHeight）不縮，只有「視覺視口」縮小並被捲動，
+   固定定位的面板就會被推出螢幕上緣。所以面板的位置與高度改用 visualViewport 計算：
+   --vv-bottom＝版面視口底邊到視覺視口底邊的距離（鍵盤高度），鍵盤開啟時面板貼在鍵盤上方、高度不超過可見區。 */
+const vvState = { kb: false, h: window.innerHeight, bottom: 0 };
+function syncViewport() {
+  const vv = window.visualViewport;
+  const H = window.innerHeight;
+  const h = vv ? vv.height : H;
+  const top = vv ? vv.offsetTop : 0;
+  const kb = H - h > 120 && document.activeElement?.matches?.('input, textarea');
+  Object.assign(vvState, { kb: !!kb, h: kb ? h : H, bottom: kb ? Math.max(0, H - h - top) : 0 });
+  document.documentElement.style.setProperty('--vv-bottom', `${vvState.bottom}px`);
+  document.body.classList.toggle('kb-open', vvState.kb);
+}
 function detents() {
   const H = window.innerHeight;
   const sf = safeProbe();
   const zone = currentViewEl()?.querySelector('.peek-block');
   const peek = 20 + (zone ? zone.offsetHeight : 50) + 8;
-  return { peek, half: Math.round(H * 0.5), full: Math.round(H - sf.top - 60) };
+  const full = vvState.kb ? vvState.h - 16 : H - sf.top - 60;
+  return { peek, half: Math.round(H * 0.5), full: Math.round(full) };
 }
 const sheet = createSheet({
   el: sheetEl,
@@ -253,7 +269,10 @@ async function initMap() {
   view.on('longpress', (p) => onMapLongPress(p));
   view.on('viewchange', () => {
     syncHud();
-    if (state.layer.mode === 'transit') drawRailStations();
+    if (state.layer.mode === 'transit') {
+      drawMetroStations();
+      scheduleMetro();
+    }
     scheduleViewSettled();
   });
   view.on('dragstart', () => {
@@ -370,8 +389,8 @@ async function applyLayer() {
     : L.mode === 'satellite' && L.source === 'google' ? GOOGLE_ATTRIBUTION
     : '';
   attrib.classList.toggle('on', !!attrib.textContent);
-  if (L.mode === 'transit') showRail();
-  else hideRail();
+  if (L.mode === 'transit') showMetro();
+  else hideMetro();
   try {
     localStorage.setItem(LAYER_KEY, JSON.stringify(L));
   } catch {
@@ -414,64 +433,79 @@ $('opt-labels').addEventListener('click', () => {
   applyLayer();
 });
 
-/* ---- 大眾運輸圖層：全國鐵路線與車站（OpenStreetMap，示意） ---- */
-let railData = null;
-let railLoading = null;
-let railOn = false;
-async function showRail() {
-  railOn = true;
-  if (!view) return;
-  if (!railData && !railLoading) {
-    railLoading = api
-      .railLines()
-      .then((d) => {
-        railData = {
-          lines: d.lines.map((l) => ({ ...l, pts: l.stations.map(([n, lng, lat]) => ({ name: n, ...toGcj(lng, lat) })) })),
-        };
-      })
-      .catch(() => {
-        toast('鐵路線資料載入失敗，大眾運輸圖層暫時只顯示淡化底圖');
-      })
-      .finally(() => {
-        railLoading = null;
-      });
-  }
-  await railLoading;
-  if (!railOn || !railData || !view) return;
-  groups.rail.clear();
-  for (const l of railData.lines) {
-    if (l.pts.length < 2) continue;
-    groups.rail.add(view?.polyline({ path: l.pts.map((p) => [p.lng, p.lat]), color: '#c1121f', weight: 2.5, opacity: 0.7, zIndex: 20 }));
-  }
-  drawRailStations();
+/* ---- 大眾運輸圖層：城市地鐵／輕軌／磁浮（OpenStreetMap，依各線顏色；資料分格子按需載入） ---- */
+const metro = createMetroLoader();
+let metroOn = false;
+let metroLines = []; // 目前已載入的線路（已是 GCJ-02）
+const metroDrawn = new Set();
+let metroSeq = 0;
+let metroTimer = null;
+const METRO_MIN_ZOOM = 8.5;
+const METRO_STATION_ZOOM = 11.5;
+const METRO_WEIGHT = { subway: 4, light_rail: 3.5, monorail: 3.5, maglev: 4.5 };
+function showMetro() {
+  metroOn = true;
+  scheduleMetro(0);
 }
-function hideRail() {
-  railOn = false;
+function hideMetro() {
+  metroOn = false;
+  metroSeq++;
+  clearTimeout(metroTimer);
+  metroDrawn.clear();
   groups?.rail.clear();
   groups?.railDots.clear();
 }
-const toGcj = (lng, lat) => {
-  const [x, y] = wgs84ToGcj02(lng, lat);
-  return { lng: x, lat: y };
-};
-function drawRailStations() {
-  if (!view || !railData || !railOn) return;
+function scheduleMetro(delay = 250) {
+  clearTimeout(metroTimer);
+  metroTimer = setTimeout(refreshMetro, delay);
+}
+async function refreshMetro() {
+  if (!metroOn || !view) return;
+  if (view.getZoom() < METRO_MIN_ZOOM) {
+    groups.rail.clear();
+    groups.railDots.clear();
+    metroDrawn.clear();
+    return;
+  }
+  const seq = ++metroSeq;
+  try {
+    const { lines } = await metro.load(view.getBounds());
+    if (!metroOn || seq !== metroSeq || !view) return;
+    metroLines = lines;
+    drawMetroLines();
+    drawMetroStations();
+  } catch (e) {
+    if (seq === metroSeq) toast(`地鐵線路資料載入失敗：${e.message || e}`);
+  }
+}
+function drawMetroLines() {
+  const b = view.getBounds();
+  for (const l of metroLines) {
+    if (metroDrawn.has(l)) continue;
+    metroDrawn.add(l);
+    const w = METRO_WEIGHT[l.kind] || 4;
+    for (const path of l.paths) {
+      groups.rail.add(view.polyline({ path, color: '#ffffff', weight: w + 3, opacity: 0.9, zIndex: 18 }));
+      groups.rail.add(view.polyline({ path, color: l.color, weight: w, opacity: 0.95, zIndex: 20 }));
+    }
+  }
+  void b;
+}
+function drawMetroStations() {
+  if (!view || !metroOn) return;
   groups.railDots.clear();
   const z = view.getZoom();
-  if (z < 9.5) return;
+  if (z < METRO_STATION_ZOOM) return;
   const b = view.getBounds();
+  const st = collectStations(metroLines, b);
   let n = 0;
-  const seen = new Set();
-  for (const l of railData.lines) {
-    for (const p of l.pts) {
-      if (p.lng < b.west || p.lng > b.east || p.lat < b.south || p.lat > b.north) continue;
-      const k = `${p.name}|${p.lng.toFixed(3)}|${p.lat.toFixed(3)}`;
-      if (seen.has(k)) continue;
-      seen.add(k);
-      if (++n > 350) return;
-      groups.railDots.add(view?.dot({ lng: p.lng, lat: p.lat, radius: z >= 12 ? 4 : 3, title: p.name }));
-      if (z >= 12 && n <= 90) groups.railDots.add(view?.text({ lng: p.lng, lat: p.lat, text: p.name }));
-    }
+  for (const s of st) {
+    if (++n > 400) break;
+    const r = z >= 14 ? 5 : z >= 12.5 ? 4 : 3;
+    groups.railDots.add(
+      view.dot(s.transfer ? { lng: s.lng, lat: s.lat, radius: r + 1.5, color: '#1c1c1e', fill: '#ffffff', title: s.name, zIndex: 60 } : { lng: s.lng, lat: s.lat, radius: r, color: s.colors[0], fill: '#ffffff', title: s.name, zIndex: 58 }),
+    );
+    if (z >= 13 && n <= 110) groups.railDots.add(view.text({ lng: s.lng, lat: s.lat, text: s.name }));
   }
 }
 
@@ -1812,11 +1846,20 @@ async function markMyLocation() {
 }
 
 /* ---------------- 啟動 ---------------- */
-window.__worldMap = { state, view: null, assignStop, planRoute, doSearch, setSnap, openRoute, setMode, runNearby, openShare, openAccount, store, showPlace, selectPoint, showMyLocationCard, set3D, applyLayer, refreshEnv, env, envState };
+window.__worldMap = { vvState, state, view: null, assignStop, planRoute, doSearch, setSnap, openRoute, setMode, runNearby, openShare, openAccount, store, showPlace, selectPoint, showMyLocationCard, set3D, applyLayer, refreshEnv, env, envState };
 loadLayerPref();
 showSearchHome();
 setSnap('peek');
-window.addEventListener('resize', () => sheet.refresh());
+function onViewportChange() {
+  syncViewport();
+  if (vvState.kb && (window.scrollY || window.pageYOffset)) window.scrollTo(0, 0); // 阻止 Safari 為了露出輸入框而捲動整頁
+  sheet.refresh();
+}
+window.addEventListener('resize', onViewportChange);
+window.visualViewport?.addEventListener('resize', onViewportChange);
+window.visualViewport?.addEventListener('scroll', onViewportChange);
+document.addEventListener('focusin', () => setTimeout(onViewportChange, 60));
+document.addEventListener('focusout', () => setTimeout(onViewportChange, 60));
 renderFavs();
 (async () => {
   try {
