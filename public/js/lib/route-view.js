@@ -1,7 +1,6 @@
 // 駕車多路線卡片的純函式（輸出已跳脫）。
 import { esc } from './transit-view.js';
 import { formatDistance, formatDuration, formatYuan } from './format.js';
-
 export const TAG_LABEL = {
   recommend: '推薦',
   fastest: '最快',
@@ -28,7 +27,11 @@ export function etaText(durationSec, departSec) {
   return `${sameDay ? '' : `${d.getMonth() + 1}/${d.getDate()} `}${p(d.getHours())}:${p(d.getMinutes())} 抵達`;
 }
 
-export function drivingCardHtml(r, { departSec = null } = {}) {
+/**
+ * 駕車卡片。fuel：{ cost: number|null, type: 'gas'|'ev', total: number|null }（由 app.js 依使用者偏好算好傳入）。
+ * cost＝能源費（油費或電費，依 type 決定字樣）；total＝能源費＋過路費合計。沒有就顯示「—」並附說明。
+ */
+export function drivingCardHtml(r, { departSec = null, fuel = null } = {}) {
   const meta = [];
   if (r.roads?.length) meta.push('經 ' + r.roads.slice(0, 4).join('、'));
   if (r.tollDistance) meta.push(`收費路段 ${formatDistance(r.tollDistance)}`);
@@ -36,11 +39,16 @@ export function drivingCardHtml(r, { departSec = null } = {}) {
   const straight = r.straightDistance
     ? `直線 ${formatDistance(r.straightDistance)}${r.detour ? ` · 繞行 ${r.detour.toFixed(2)} 倍` : ''}`
     : '';
+  const costLine = fuel
+    ? `${fuel.type === 'ev' ? '電費' : '油費'} ${formatYuan(fuel.cost)}`
+    : '';
+  const totalLine = fuel?.total != null ? `合計約 ¥${Math.round(fuel.total)}（${fuel.type === 'ev' ? '電費' : '油費'}＋過路費，估算）` : '';
   return `<div class="top"><span class="dur">${esc(formatDuration(r.duration))}</span><span class="dist">${esc(formatDistance(r.distance))}</span>
-    <span class="toll">過路費 ${esc(formatYuan(r.tolls))}</span></div>
+    <span class="toll">過路費 ${esc(formatYuan(r.tolls))}${costLine ? ` · <span class="fuel">${esc(costLine)}</span>` : ''}</div>
     ${r.tags?.length ? `<div class="tags">${tagsHtml(r.tags)}</div>` : ''}
     <div class="meta">${esc(etaText(r.duration, departSec))}${straight ? ` · ${esc(straight)}` : ''}</div>
     <div class="meta">${esc(meta.join(' · '))}</div>
+    ${totalLine ? `<div class="meta total">${esc(totalLine)}</div>` : ''}
     ${r.restriction ? '<div class="warn">⚠ 此路線有無法避開的限行路段</div>' : ''}`;
 }
 

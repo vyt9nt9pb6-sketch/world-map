@@ -13,6 +13,7 @@ import {
   validateNearby,
   validateRegeo,
   validateEnvironment,
+  validateWeather,
   validatePlace,
   ROUTE_STRATEGIES,
   TRANSIT_STRATEGIES,
@@ -385,6 +386,82 @@ export async function handleEnvironment(ctx) {
   return json(out, 200, { 'cache-control': 'public, max-age=300' });
 }
 
+// ───────────── 天氣（Open-Meteo，CC BY 4.0）─────────────
+// 與海拔／氣壓同一個提供者。由 Worker／伺服器代為呼叫，瀏覽器不直接連 api.open-meteo.com
+// （中國大陸可能連不到，也讓 CSP 維持 connect-src 'self'）。
+// current＋每日 7 天＋每小時 48 小時（給「抵達時天氣」用，只取數值精簡回傳）。
+const OPEN_METEO_FORECAST = 'https://api.open-meteo.com/v1/forecast';
+
+/** Open-Meteo 回應 → 精簡 JSON（去掉 API 用的完整欄位與單位物件，數值一律檢查有限數） */
+export function mapWeatherResponse(b) {
+  const num = (x) => (typeof x === 'number' && Number.isFinite(x) ? x : null);
+  const str = (x) => (typeof x === 'string' && x ? x : null);
+  const cur = b?.current;
+  const daily = Array.isArray(b?.daily?.time) ? b.daily.time : [];
+  const hourly = Array.isArray(b?.hourly?.time) ? b.hourly.time : [];
+  const pick = (obj, key, i) => num(obj?.[key]?.[i]);
+  return {
+    attribution: 'Weather data by Open-Meteo.com (CC BY 4.0)',
+    timezone: str(b?.timezone),
+    updatedAt: str(b?.current?.time),
+    current: cur
+      ? {
+          time: str(cur.time),
+          temperature: num(cur.temperature_2m),
+          apparent: num(cur.apparent_temperature),
+          humidity: num(cur.relative_humidity_2m),
+          precipitation: num(cur.precipitation),
+          code: num(cur.weather_code),
+          wind: num(cur.wind_speed_10m),
+        }
+      : null,
+    daily: daily.slice(0, 7).map((date, i) => ({
+      date,
+      code: pick(b.daily, 'weather_code', i),
+      tMax: pick(b.daily, 'temperature_2m_max', i),
+      tMin: pick(b.daily, 'temperature_2m_min', i),
+      precipProb: pick(b.daily, 'precipitation_probability_max', i),
+      precipSum: pick(b.daily, 'precipitation_sum', i),
+    })),
+    hourly: hourly.slice(0, 48).map((time, i) => ({
+      time,
+      temperature: pick(b.hourly, 'temperature_2m', i),
+      code: pick(b.hourly, 'weather_code', i),
+      precipProb: pick(b.hourly, 'precipitation_probability', i),
+    })),
+  };
+}
+
+export async function handleWeather(ctx) {
+  const v = validateWeather(ctx.params);
+  const url = new URL(OPEN_METEO_FORECAST);
+  url.searchParams.set('latitude', String(v.lat));
+  url.searchParams.set('longitude', String(v.lng));
+  url.searchParams.set('current', 'temperature_2m,apparent_temperature,relative_humidity_2m,precipitation,weather_code,wind_speed_10m');
+  url.searchParams.set('daily', 'weather_code,temperature_2m_max,temperature_2m_min,precipitation_probability_max,precipitation_sum');
+  url.searchParams.set('hourly', 'temperature_2m,weather_code,precipitation_probability');
+  url.searchParams.set('timezone', 'auto');
+  url.searchParams.set('forecast_days', '7');
+  url.searchParams.set('forecast_hours', '48');
+  let res;
+  try {
+    res = await (ctx.fetchImpl ?? fetch)(url.toString(), { headers: { accept: 'application/json' }, signal: AbortSignal.timeout(UPSTREAM_TIMEOUT_MS) });
+  } catch {
+    throw new UpstreamError(504, 'upstream_timeout', '氣象資料連線逾時，請稍後再試');
+  }
+  if (!res.ok) throw new UpstreamError(res.status === 429 ? 429 : 502, 'upstream', '氣象資料暫時無法使用，請稍後再試');
+  let b;
+  try {
+    b = await res.json();
+  } catch {
+    throw new UpstreamError(502, 'upstream', '氣象資料回應格式錯誤');
+  }
+  const out = mapWeatherResponse(b);
+  if (!out.current && !out.daily.length) throw new UpstreamError(502, 'upstream', '氣象資料回應格式錯誤');
+  // 位置已四捨五入到 0.01°（約 1 公里），天氣 10 分鐘內不變，可公開快取
+  return json(out, 200, { 'cache-control': 'public, max-age=600' });
+}
+
 // ───────────── 大眾運輸圖層：鐵路線資料（OSM, ODbL）─────────────
 export async function handleRailLines() {
   return json({ attribution: railData.attribution, lines: railData.lines.map((l) => ({ id: l.id, ref: l.ref, name: l.name, from: l.from, to: l.to, stations: l.stations })) }, 200, {
@@ -417,6 +494,7 @@ const ROUTES = {
   '/api/place': { GET: data(handlePlace) },
   '/api/regeo': { GET: data(handleRegeo) },
   '/api/environment': { GET: raw(handleEnvironment) },
+  '/api/weather': { GET: raw(handleWeather) },
   '/api/rail-lines': { GET: raw(handleRailLines) },
   '/api/config': { GET: raw(getConfig) },
   '/api/google-tiles/session': { POST: raw(createGoogleTileSession, true) },

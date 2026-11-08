@@ -327,3 +327,34 @@ body[data-snap='full'] .map-attrib { opacity: 0; }
   background:
     linear-gradient(160deg, #7cb342 0%, #cddc39 35%, #8d6e63 55%, #eceff1 100%);
 }
+
+/* ---- v4.2 天氣卡（地點頁）與抵達時天氣（路線頁）---- */
+.wx-card { padding: 12px 14px; margin: 0 0 12px; }
+.wx-now { display: flex; align-items: center; gap: 10px; }
+.wx-emoji { font-size: 34px; line-height: 1; flex: none; }
+.wx-temp { font-size: 28px; font-weight: 700; font-variant-numeric: tabular-nums; }
+.wx-temp small { display: block; font-size: 13px; font-weight: 500; color: var(--muted); }
+.wx-meta { margin-left: auto; text-align: right; font-size: 12px; color: var(--muted); line-height: 1.5; max-width: 46%; }
+.wx-days { display: grid; grid-template-columns: repeat(3, 1fr); gap: 6px 10px; border-top: 0.5px solid var(--sep); margin-top: 10px; padding-top: 10px; }
+.wx-day { display: grid; grid-template-columns: 34px 26px 1fr; grid-template-rows: auto auto; align-items: center; column-gap: 4px; min-width: 0; }
+.wx-day > span { font-size: 12px; color: var(--muted); font-weight: 600; }
+.wx-day > i { font-size: 18px; text-align: center; }
+.wx-day > b { font-size: 13px; font-weight: 600; font-variant-numeric: tabular-nums; white-space: nowrap; }
+.wx-day > small { grid-column: 3; font-size: 11px; color: var(--blue); font-variant-numeric: tabular-nums; }
+.wx-day > small:empty { display: none; }
+.wx-day > em { grid-column: 1 / -1; font-style: normal; font-size: 11px; color: var(--muted); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.wx-attr { margin: 8px 0 0; line-height: 1.4; }
+.wx-arrive-slot, .wx-arrive { background: var(--card); border-radius: 12px; padding: 10px 12px; font-size: 14px; margin: 0 0 8px; }
+.wx-arrive-slot.hidden { display: none; }
+
+/* ---- v4.2 能耗估算（路線選項）---- */
+.fuel-opts { border-top: 0.5px solid var(--sep); padding-top: 10px; margin-top: 10px; display: flex; flex-direction: column; gap: 10px; }
+.fuel-opts .opt-title { font-size: 13px; font-weight: 600; color: var(--muted); }
+.fuel-inputs { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+.fuel-inputs label { display: grid; grid-template-columns: auto 1fr; align-items: center; gap: 4px 8px; min-width: 0; }
+.fuel-inputs label > span { font-size: 14px; color: var(--muted); }
+.fuel-inputs label > em { grid-column: 2; font-style: normal; font-size: 11px; color: var(--muted); }
+.fuel-inputs input { grid-row: 1; grid-column: 2; width: 100%; padding: 6px 8px; font-size: 15px; font-variant-numeric: tabular-nums; }
+#fuel-note { margin: 0; line-height: 1.45; }
+.route-option .top .fuel { color: var(--orange); }
+.route-option .meta.total { color: var(--text); font-weight: 600; }

@@ -1,6 +1,6 @@
 // World Map v3 — 前端主程式（Apple 地圖風格）
 // 座標約定：畫面上所有點（地圖、搜尋結果、路線）都是 GCJ-02；只有瀏覽器定位是 WGS-84，取得後立刻轉換。
-import { wgs84ToGcj02, haversine } from './lib/coords.js';
+import { wgs84ToGcj02, gcj02ToWgs84, haversine } from './lib/coords.js';
 import { api } from './lib/api.js';
 import { formatDistance, formatDuration, formatYuan } from './lib/format.js';
 import { amapIosUri, amapWebUrl, appleMapsUrl, detectPlatform } from './lib/navlinks.js';
@@ -10,6 +10,8 @@ import { createMapboxSatFlexible, createGoogleSatFlexible, createGoogleTerrainFl
 import { createReachProbe } from './lib/reach.js';
 import { splitTels, telHref, categoryOf, subLine, badgesHtml, photosHtml, infoRows, viewportRadius, movedEnough } from './lib/place-view.js';
 import { drivingCardHtml, routeLabelHtml, midPoint, quickPicks } from './lib/route-view.js';
+import { weatherCardHtml, arrivalWeatherHtml } from './lib/weather.js';
+import { loadFuelPrefs, saveFuelPrefs, energyCost, totalTripCost, fuelSummary, FUEL_DEFAULTS, EV_DEFAULTS } from './lib/fuel.js';
 import { createWorldCoverFlexible, WORLDCOVER_LEGEND, legendColor, WORLDCOVER_ATTRIBUTION } from './lib/landcover.js';
 import { createMetroLoader, collectStations } from './lib/metro-layer.js';
 import { createStore, findSamePlace } from './lib/favstore.js';
@@ -98,6 +100,48 @@ const saveRouteOpts = () => {
     /* 無痕模式 */
   }
 };
+
+/* ---- 油費／電費估算偏好（v4.2）---- */
+let fuelPrefs = loadFuelPrefs();
+function syncFuelOpts() {
+  const ev = fuelPrefs.type === 'ev';
+  document.querySelectorAll('#fuel-type [data-t]').forEach((b) => b.setAttribute('aria-checked', String(b.dataset.t === fuelPrefs.type)));
+  $('fuel-cons').value = fuelPrefs.consumption;
+  $('fuel-price').value = fuelPrefs.price;
+  $('fuel-cons-lbl').textContent = ev ? '電耗' : '油耗';
+  $('fuel-cons-unit').textContent = ev ? 'kWh/100km' : 'L/100km';
+  $('fuel-price-lbl').textContent = ev ? '電價' : '油價';
+  $('fuel-price-unit').textContent = ev ? '¥/kWh' : '¥/L';
+}
+$('fuel-type').addEventListener('click', (e) => {
+  const b = e.target.closest('[data-t]');
+  if (!b || b.dataset.t === fuelPrefs.type) return;
+  fuelPrefs.type = b.dataset.t;
+  // 切換車種時把數值帶成該車種的參考預設（使用者之後可再改，改過就存偏好）
+  fuelPrefs = { ...fuelPrefs, ...(fuelPrefs.type === 'ev' ? EV_DEFAULTS : FUEL_DEFAULTS) };
+  saveFuelPrefs(fuelPrefs);
+  syncFuelOpts();
+  if (state.mode === 'driving' && state.routes.length) renderRoutes();
+});
+for (const [id, field] of [
+  ['fuel-cons', 'consumption'],
+  ['fuel-price', 'price'],
+]) {
+  $(id).addEventListener('change', (e) => {
+    const n = Number(e.target.value);
+    if (Number.isFinite(n) && n > 0) fuelPrefs[field] = Math.round(n * 100) / 100;
+    saveFuelPrefs(fuelPrefs);
+    syncFuelOpts();
+    if (state.mode === 'driving' && state.routes.length) renderRoutes();
+  });
+}
+syncFuelOpts();
+/** 駕車卡片的能耗資訊：null＝偏好不完整（不顯示）。 */
+function fuelForRoute(r) {
+  const cost = energyCost(r.distance, fuelPrefs);
+  if (cost == null) return null;
+  return { cost, type: fuelPrefs.type, total: totalTripCost(cost, r.tolls) };
+}
 const store = createStore();
 const history_ = createHistory();
 let view = null; // 地圖（AMap 載入後才有）
@@ -931,6 +975,46 @@ let placeStop = null;
 let placeSeq = 0;
 let placeData = null; // 目前地點的資料（搜尋結果摘要＋/api/place 詳細資料）
 let placeRows = null; // 自訂資訊列（我的位置、等待查詢中）；null＝由 placeData 產生
+let placeWeather = null; // 目前地點的天氣（/api/weather；null＝還沒有或失敗）
+let weatherCtrl = null;
+let weatherSeq = 0; // 獨立計數器：不動 placeSeq（selectPoint 依賴它判斷 regeo 是否過期）
+const weatherCache = new Map(); // 「lat,lng」→ { w, at }（10 分鐘）
+
+/** 地點的天氣（GCJ-02 → WGS-84 再查；快取 10 分鐘）。失敗時靜默不顯示（天氣是加分項）。 */
+async function loadWeather(lng, lat, { signal } = {}) {
+  const [wlng, wlat] = gcj02ToWgs84(lng, lat);
+  const key = `${wlat.toFixed(2)},${wlng.toFixed(2)}`;
+  const hit = weatherCache.get(key);
+  if (hit && Date.now() - hit.at < 600000) return hit.w;
+  const w = await api.weather(wlat, wlng, { signal });
+  weatherCache.set(key, { w, at: Date.now() });
+  if (weatherCache.size > 40) weatherCache.delete(weatherCache.keys().next().value);
+  return w;
+}
+async function loadPlaceWeather(stop) {
+  const seq = ++weatherSeq;
+  const box = $('place-weather');
+  if (!stop || stop.isCurrentLocation || !Number.isFinite(stop.lng) || !Number.isFinite(stop.lat)) {
+    box.classList.add('hidden');
+    box.innerHTML = '';
+    placeWeather = null;
+    return;
+  }
+  weatherCtrl?.abort();
+  weatherCtrl = new AbortController();
+  try {
+    const w = await loadWeather(stop.lng, stop.lat, { signal: weatherCtrl.signal });
+    if (seq !== weatherSeq) return; // 已切到別的地點
+    placeWeather = w;
+    box.innerHTML = weatherCardHtml(w);
+    box.classList.toggle('hidden', !box.innerHTML);
+  } catch (e) {
+    if (e.name !== 'AbortError' && seq === weatherSeq) {
+      placeWeather = null;
+      box.classList.add('hidden');
+    }
+  }
+}
 function placeInfoRows(rows) {
   $('place-info').innerHTML = rows.filter(Boolean).map(([k, v]) => `<div class="row"><span>${esc(k)}</span><span>${v}</span></div>`).join('');
   $('place-info').classList.toggle('hidden', !rows.filter(Boolean).length);
@@ -1014,6 +1098,7 @@ function showPlace(stop, { addr, rows, zoom, keepView = false, data = null } = {
   setSnap('half');
   $('view-place').querySelector('.scroll')?.scrollTo?.(0, 0);
   if (stop.poiId && !stop.isCurrentLocation) loadPlaceDetail(stop);
+  loadPlaceWeather(stop);
   if (view && !keepView) {
     if (zoom) view.flyTo(stop, Math.max(view.getZoom(), zoom), mapPad());
     else setTimeout(() => view.ensureVisible(stop, mapPad()), 60);
@@ -1172,6 +1257,7 @@ function syncRouteOpts() {
   $('route-opts').classList.toggle('hidden', !withDepart);
   $('row-avoid-hw').classList.toggle('hidden', !drv);
   $('row-avoid-toll').classList.toggle('hidden', !drv);
+  $('row-fuel').classList.toggle('hidden', !drv);
   $('opt-avoid-hw').checked = state.avoidHighway;
   $('opt-avoid-toll').checked = state.avoidToll;
   const at = state.depart != null;
@@ -1180,6 +1266,7 @@ function syncRouteOpts() {
   const parts = [at ? `${new Date(state.depart * 1000).toLocaleString('zh-TW', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit', hour12: false })} 出發` : '現在出發'];
   if (drv && state.avoidHighway) parts.push('避開高速');
   if (drv && state.avoidToll) parts.push('避開收費');
+  if (drv) parts.push(fuelSummary(fuelPrefs));
   $('route-opts-sum').textContent = parts.join('・');
 }
 $('opt-avoid-hw').addEventListener('change', (e) => {
@@ -1270,11 +1357,14 @@ $('btn-swap').addEventListener('click', () => {
 function clearRoute() {
   state.routes = [];
   routeCtrl?.abort();
+  arriveCtrl?.abort();
   groups?.route.clear();
   groups?.stops.clear();
   $('route-options').innerHTML = '';
   $('route-quick').classList.add('hidden');
   $('route-depart-note').classList.add('hidden');
+  $('route-arrive').classList.add('hidden');
+  $('route-arrive').innerHTML = '';
   $('nav-buttons').classList.add('hidden');
   $('nav-note').classList.add('hidden');
   setStatus('route-status', '');
@@ -1362,7 +1452,7 @@ function stepsHtml(r) {
 }
 function routeCard(r, sel) {
   const mode = state.mode;
-  if (mode === 'driving') return drivingCardHtml(r, { departSec: state.depart });
+  if (mode === 'driving') return drivingCardHtml(r, { departSec: state.depart, fuel: fuelForRoute(r) });
   if (mode === 'transit') {
     const fee = r.fee != null ? `<span class="fee">車費 ${formatYuan(r.fee)}</span>` : '';
     return `<div class="top"><span class="dur">${formatDuration(r.duration)}</span><span class="dist">${formatDistance(r.distance)}</span>${fee}</div>
@@ -1455,6 +1545,35 @@ function renderRoutes(fit = false) {
   if (fit) {
     const r = state.routes[state.routeIdx];
     view?.fit(r.polyline.map(([lng, lat]) => ({ lng, lat })), mapPad());
+  }
+  loadArriveWeather();
+}
+
+/* ---- 抵達時天氣（v4.2）：駕車路線的終點、以預計抵達時刻對 hourly 預報取值 ---- */
+let arriveCtrl = null;
+async function loadArriveWeather() {
+  const box = $('route-arrive');
+  const dest = state.dest;
+  const r = state.mode === 'driving' && state.routes.length ? state.routes[state.routeIdx] : null;
+  if (!r || !dest || !Number.isFinite(r.duration) || dest.isCurrentLocation) {
+    box.classList.add('hidden');
+    box.innerHTML = '';
+    return;
+  }
+  const idx = state.routeIdx;
+  arriveCtrl?.abort();
+  arriveCtrl = new AbortController();
+  try {
+    const w = await loadWeather(dest.lng, dest.lat, { signal: arriveCtrl.signal });
+    if (state.mode !== 'driving' || state.routeIdx !== idx || !state.routes.length) return;
+    const etaMs = (state.depart ?? Math.floor(Date.now() / 1000)) * 1000 + r.duration * 1000;
+    box.innerHTML = arrivalWeatherHtml(w.hourly || [], etaMs);
+    box.classList.toggle('hidden', !box.innerHTML);
+  } catch (e) {
+    if (e.name !== 'AbortError' && state.routeIdx === idx) {
+      box.classList.add('hidden');
+      box.innerHTML = '';
+    }
   }
 }
 

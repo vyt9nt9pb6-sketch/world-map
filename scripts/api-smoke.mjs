@@ -93,5 +93,14 @@ for (const mode of ['walking', 'bicycling', 'electrobike']) {
   const p = new URL(u);
   check('分享連結格式（GCJ-02 lng,lat）', p.hostname === 'uri.amap.com' && /^[\d.]+,[\d.]+$/.test(p.searchParams.get('position')));
 }
+// ───────── v4.2 天氣 ─────────
+{
+  const r = await call('/api/weather?lat=34.60&lng=119.22');
+  const c = r.body.current;
+  check('天氣 連雲港', r.status === 200 && !!c && Number.isFinite(c.temperature) && r.body.daily?.length >= 5, `現在天氣 code=${c?.code} ${c?.temperature}°C，${r.body.daily?.length} 天，${r.body.hourly?.length} 小時，${r.ms}ms`);
+  check('天氣 回應含 Open-Meteo 標示', r.body.attribution?.includes('Open-Meteo'));
+  const bad = await call('/api/weather?lat=999&lng=0');
+  check('天氣 無效參數 → 400', bad.status === 400 && bad.body.error?.field === 'lat');
+}
 console.log(failed ? `\n${failed} 項失敗` : '\n全部通過');
 process.exit(failed ? 1 : 0);

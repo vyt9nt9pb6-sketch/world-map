@@ -132,6 +132,7 @@
         <div class="scroll">
           <div id="place-photos" class="photo-strip hidden" aria-label="照片"></div>
           <div id="place-badges" class="badges hidden"></div>
+          <div id="place-weather" class="wx-slot hidden" aria-live="polite"></div>
           <div class="action-row four">
             <button type="button" id="place-route" class="act primary"><svg><use href="#i-route" /></svg><span>路線</span></button>
             <button type="button" id="place-call" class="act hidden"><svg><use href="#i-phone" /></svg><span>電話</span></button>
@@ -172,11 +173,24 @@
             <input type="datetime-local" id="depart-input" class="hidden" aria-label="出發時間" />
             <label class="switch-row" id="row-avoid-hw"><span>避開高速公路</span><input type="checkbox" role="switch" id="opt-avoid-hw" /><i class="tgl" aria-hidden="true"></i></label>
             <label class="switch-row" id="row-avoid-toll"><span>避開收費站</span><input type="checkbox" role="switch" id="opt-avoid-toll" /><i class="tgl" aria-hidden="true"></i></label>
+            <div id="row-fuel" class="fuel-opts">
+              <div class="opt-title">能耗估算</div>
+              <div class="seg-ctl" id="fuel-type" role="radiogroup" aria-label="車輛類型">
+                <button type="button" role="radio" data-t="gas" aria-checked="true">油車</button>
+                <button type="button" role="radio" data-t="ev" aria-checked="false">電車</button>
+              </div>
+              <div class="fuel-inputs">
+                <label><span id="fuel-cons-lbl">油耗</span><input type="number" id="fuel-cons" inputmode="decimal" min="0.5" max="99" step="0.1" aria-label="百公里能耗" /><em id="fuel-cons-unit">L/100km</em></label>
+                <label><span id="fuel-price-lbl">油價</span><input type="number" id="fuel-price" inputmode="decimal" min="0.01" max="99" step="0.01" aria-label="能源單價" /><em id="fuel-price-unit">¥/L</em></label>
+              </div>
+              <p class="muted small" id="fuel-note">預設值僅供參考（油價因地而異），改成你車子的實際數字更準。油費＝距離×油耗×油價，為估算值。</p>
+            </div>
           </details>
           <div class="chips" id="strategy-chips" role="radiogroup" aria-label="路線偏好"></div>
           <div class="chips hidden" id="route-quick" role="group" aria-label="快速選擇路線"></div>
           <div id="route-status" class="status" role="status" aria-live="polite"></div>
           <p id="route-depart-note" class="muted small hidden"></p>
+          <div id="route-arrive" class="wx-arrive-slot hidden" aria-live="polite"></div>
           <ul id="route-options" class="route-options"></ul>
           <div id="nav-buttons" class="action-row hidden">
             <button type="button" class="act primary wide" id="nav-amap"><span>高德地圖導航</span></button>

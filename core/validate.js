@@ -216,6 +216,9 @@ export function validateEnvironment(params) {
   return { lat: read('lat', 90), lng: read('lng', 180) };
 }
 
+/** 天氣：與海拔／氣壓相同的座標驗證（WGS-84）。 */
+export const validateWeather = validateEnvironment;
+
 export function validatePlace(params) {
   const id = poiId(params, 'id');
   if (!id) throw new ValidationError('id', '缺少參數 id');

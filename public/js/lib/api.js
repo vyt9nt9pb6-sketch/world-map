@@ -65,6 +65,7 @@ export const api = {
   config: (opts) => get('/api/config', {}, opts),
   regeo: (p, radius, opts) => get('/api/regeo', { location: ll(p), radius }, opts),
   environment: (lat, lng, signal) => get('/api/environment', { lat, lng }, { signal }),
+  weather: (lat, lng, opts) => get('/api/weather', { lat, lng }, opts),
   railLines: (opts) => get('/api/rail-lines', {}, opts),
   nearby: ({ kind, center, radius }, opts) => get('/api/nearby', { kind, location: ll(center), radius }, opts),
   authMe: () => get('/api/auth/me', {}),
