@@ -3,6 +3,7 @@
 import worker from './index.js';
 import { ASSETS_MAP } from 'virtual:assets';
 import { securityHeaders } from '../core/security.js';
+import { assetCacheControl } from '../core/asset-rev.js';
 
 const decoded = new Map();
 function body(path) {
@@ -28,7 +29,7 @@ const assets = {
     const headers = {
       'content-type': a.type,
       etag,
-      'cache-control': a.type.startsWith('text/html') ? 'no-cache' : 'public, max-age=3600',
+      'cache-control': assetCacheControl(a.type),
       ...securityHeaders(path),
     };
     if (request.headers.get('if-none-match') === etag) return new Response(null, { status: 304, headers });

@@ -2179,31 +2179,30 @@ $('heat-hud-traffic').innerHTML = TRAFFIC_LEGEND.map((s) => `<span class="tl"><i
 $('heat-hud-pop-bar').style.background = `linear-gradient(90deg,${DENSITY_STOPS.map((s) => s.hex).join(',')})`;
 $('foot-bg-note').textContent = FOOT_BACKGROUND;
 $('foot-privacy').textContent = FOOT_PRIVACY;
-$('opt-pop').addEventListener('click', () => {
-  state.heat.pop = !state.heat.pop;
-  saveHeatPref();
-  applyHeat();
-});
-$('opt-traffic').addEventListener('click', () => {
-  state.heat.traffic = !state.heat.traffic;
-  saveHeatPref();
-  applyHeat();
-});
-$('opt-foot').addEventListener('click', () => {
-  state.heat.foot = !state.heat.foot;
-  saveHeatPref();
-  applyHeat();
-});
-$('opt-foot-rec').addEventListener('click', () => {
-  if (!state.user) {
-    toast('請先登入。足跡只會記在你自己的帳號');
+// 整列都能點（名稱或開關）。只聽 click：再加 pointerup 會在 iOS 上連點兩次，看起來像沒反應。
+$('layer-heat').addEventListener('click', (e) => {
+  const row = e.target.closest('.opt-row');
+  const sw = row ? [...row.children].find((el) => el.classList?.contains('switch')) : null;
+  if (!row || !sw || !$('layer-heat').contains(row)) return;
+  if (e.target.closest('input, a, .seg-ctl')) return;
+  if (sw.id === 'opt-foot-rec') {
+    if (!state.user) {
+      toast('請先登入。足跡只會記在你自己的帳號');
+      return;
+    }
+    state.heat.footRec = !state.heat.footRec;
+    saveHeatPref();
+    renderHeat();
+    syncRecorder();
+    if (state.heat.footRec) toast('開始記錄足跡。這個分頁在背景或關掉後就不會再記。');
     return;
   }
-  state.heat.footRec = !state.heat.footRec;
+  if (sw.id === 'opt-pop') state.heat.pop = !state.heat.pop;
+  else if (sw.id === 'opt-traffic') state.heat.traffic = !state.heat.traffic;
+  else if (sw.id === 'opt-foot') state.heat.foot = !state.heat.foot;
+  else return;
   saveHeatPref();
-  renderHeat();
-  syncRecorder();
-  if (state.heat.footRec) toast('開始記錄足跡。這個分頁在背景或關掉後就不會再記。');
+  applyHeat();
 });
 $('pop-opacity').addEventListener('input', () => {
   const n = Number($('pop-opacity').value);
