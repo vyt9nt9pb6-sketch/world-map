@@ -60,6 +60,8 @@ Vercel 沒有 KV，跟收藏一樣：人口密度與路況可以用，足跡登�
 
 `npm test`（含 `tests/v5-population.test.js`、`tests/v5-footprint.test.js`、`tests/v5-frontend.test.js`）。截圖：`node scripts/screenshots-v5.mjs`（本機靜態檔＋線上 `/api`；足跡在截圖腳本裡模擬登入，不會寫進正式 KV）→ `screenshots/v5-*.png`。
 
+**iPhone 若熱力開關點了沒反應：** Safari 會把 `/js/app.js` 快取一小時（`max-age=3600`），HTML 卻是 `no-cache`。部署後會出現「新的頁面、舊的程式」：三個開關畫得出來，但舊程式沒有監聽，點下去開關不會動。Worker 現在會在 HTML 裡把 `app.js`／CSS 加上 `?v=<etag>`，網址變了就不能沿用舊快取；JS／CSS 本身也改成 `no-cache`。修正部署之後，重新打開或下拉重新整理一次即可，不必清除網站資料。
+
 ## v4（Liquid Glass、圖層網格、地點頁、多路線）
 
 ### 變更摘要

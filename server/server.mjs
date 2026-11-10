@@ -12,6 +12,8 @@ const PORT = Number(process.env.PORT || 8787);
 const HOST = process.env.HOST || '127.0.0.1';
 
 import { securityHeaders } from '../core/security.js';
+import { createHash } from 'node:crypto';
+import { VERSIONED_ASSETS, assetCacheControl, rewriteAssetUrls } from '../core/asset-rev.js';
 
 // 只傳入需要的環境變數（金鑰只在後端使用）。本機沒有 Workers KV：登入／收藏用記憶體儲存，重啟即清空。
 const ENV_NAMES = [
@@ -50,11 +52,24 @@ async function serveStatic(req, res, pathname) {
   try {
     const st = await stat(file);
     if (!st.isFile()) return send(res, 404, 'Not found');
-    const body = await readFile(file);
+    let body = await readFile(file);
     const ext = path.extname(file);
+    const type = TYPES[ext] || 'application/octet-stream';
+    if (type.startsWith('text/html')) {
+      const versions = {};
+      for (const assetPath of VERSIONED_ASSETS) {
+        try {
+          const buf = await readFile(path.join(ROOT, assetPath.replace(/^\//, '')));
+          versions[assetPath] = createHash('sha256').update(buf).digest('hex').slice(0, 16);
+        } catch {
+          versions[assetPath] = '';
+        }
+      }
+      body = Buffer.from(rewriteAssetUrls(body.toString('utf8'), versions));
+    }
     res.writeHead(200, {
-      'content-type': TYPES[ext] || 'application/octet-stream',
-      'cache-control': ext === '.html' ? 'no-cache' : 'public, max-age=300',
+      'content-type': type,
+      'cache-control': assetCacheControl(type),
       ...securityHeaders(pathname),
     });
     res.end(req.method === 'HEAD' ? undefined : body);

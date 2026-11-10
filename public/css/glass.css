@@ -242,6 +242,9 @@ details.week summary::-webkit-details-marker { display: none; }
 
 /* 熱力圖：圖例與開關。圖例本體不用 backdrop-filter，避免跟地圖疊兩層模糊。 */
 #layer-heat > .opt-title { padding-top: 10px; }
+/* 整列都是開關。touch-action 避免 iOS 把點擊吃成雙擊縮放。 */
+#layer-heat .opt-row { cursor: pointer; touch-action: manipulation; -webkit-tap-highlight-color: transparent; }
+#layer-heat .switch { touch-action: manipulation; }
 .heat-extra { padding: 0 0 6px; }
 .heat-slider { display: flex; align-items: center; gap: 10px; padding: 2px 0 8px; font-size: 14px; font-weight: 600; }
 .heat-slider input[type='range'] { flex: 1; min-width: 0; accent-color: #0a84ff; height: 28px; }
