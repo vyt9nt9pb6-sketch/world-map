@@ -1,9 +1,11 @@
 // Playwright 輔助：以真的 WebGL（SwiftShader）開手機視窗；可選擇用本機 public/ 檔案覆蓋線上靜態檔（API 仍打線上 Worker）
-import { chromium } from '/workspace/world-map/node_modules/playwright-core/index.mjs';
+import { chromium } from 'playwright-core';
 import { readFileSync, existsSync, statSync } from 'fs';
 import { extname, join } from 'path';
+import { fileURLToPath } from 'url';
 export const BASE = process.env.WM_BASE || 'https://world-map.kwok-worldmap.workers.dev';
-const MIME = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.svg': 'image/svg+xml', '.png': 'image/png', '.json': 'application/json', '.webmanifest': 'application/manifest+json' };
+const PUBLIC = fileURLToPath(new URL('../public/', import.meta.url));
+const MIME = { '.html': 'text/html; charset=utf-8', '.js': 'text/javascript; charset=utf-8', '.css': 'text/css; charset=utf-8', '.svg': 'image/svg+xml', '.png': 'image/png', '.gz': 'application/gzip', '.bin': 'application/octet-stream', '.json': 'application/json', '.webmanifest': 'application/manifest+json' };
 export async function launch({ local = false, geo = { longitude: 121.4737, latitude: 31.2304 }, dpr = 3, dark = false } = {}) {
   const browser = await chromium.launch({
     executablePath: '/usr/bin/google-chrome',
@@ -31,7 +33,7 @@ export async function launch({ local = false, geo = { longitude: 121.4737, latit
   const errors = [];
   page.on('pageerror', (e) => errors.push(e.message));
   if (local) {
-    const root = '/workspace/world-map/public';
+    const root = PUBLIC;
     await page.route(`${BASE}/**`, (route) => {
       const u = new URL(route.request().url());
       if (u.pathname.startsWith('/api/') || u.pathname.startsWith('/_AMapService')) return route.continue();

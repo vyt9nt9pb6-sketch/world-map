@@ -240,6 +240,33 @@ details.week summary::-webkit-details-marker { display: none; }
 .toast { border-radius: 999px; color: var(--text); padding: 11px 18px; transition: transform 0.55s var(--spring), opacity 0.25s; }
 .emo-pin { box-shadow: 0 3px 8px rgba(0, 0, 0, 0.3), inset 0 1px 0 #fff; }
 
+/* 熱力圖：圖例與開關。圖例本體不用 backdrop-filter，避免跟地圖疊兩層模糊。 */
+#layer-heat > .opt-title { padding-top: 10px; }
+.heat-extra { padding: 0 0 6px; }
+.heat-slider { display: flex; align-items: center; gap: 10px; padding: 2px 0 8px; font-size: 14px; font-weight: 600; }
+.heat-slider input[type='range'] { flex: 1; min-width: 0; accent-color: #0a84ff; height: 28px; }
+.heat-legend { display: flex; flex-wrap: wrap; gap: 4px 8px; align-items: center; padding: 0 0 8px; }
+.heat-legend .heat-bar, .heat-legend .heat-labels { flex: 1 0 100%; }
+.heat-bar { display: block; height: 8px; border-radius: 99px; box-shadow: inset 0 0 0 0.5px rgba(0, 0, 0, 0.28); }
+.heat-labels { display: flex; justify-content: space-between; font-size: 10px; color: var(--muted); font-variant-numeric: tabular-nums; }
+.heat-labels i { font-style: normal; }
+.heat-unit { font-size: 11px; line-height: 1.35; color: var(--muted); }
+.heat-legend .tl, .heat-hud .tl { display: inline-flex; align-items: center; gap: 4px; font-size: 12px; font-weight: 600; }
+.heat-hud .tl { margin-right: 6px; font-size: 11px; }
+.heat-hud .tl i { width: 8px; height: 8px; border-radius: 2px; display: inline-block; }
+.heat-legend .tl i { width: 12px; height: 12px; border-radius: 3px; box-shadow: inset 0 0 0 0.5px rgba(0, 0, 0, 0.3); }
+.heat-login p { margin: 2px 0 8px; font-size: 13px; line-height: 1.45; }
+.heat-login .btn-fill, #foot-clear { width: 100%; }
+#foot-clear { margin-top: 8px; }
+.foot-range { display: flex; width: 100%; margin: 2px 0 8px; }
+.foot-range button { flex: 1; padding: 6px 2px; font-size: 13px; }
+.heat-hud { position: fixed; z-index: 16; left: 12px; bottom: calc(var(--sheet-h, 120px) + 46px + var(--safe-b)); max-width: min(78vw, 280px); display: flex; flex-direction: column; gap: 4px; padding: 8px 10px; border-radius: 16px; background: rgba(250, 250, 253, 0.9); color: #16161a; font-size: 11px; font-weight: 600; line-height: 1.3; box-shadow: 0 6px 18px rgba(20, 24, 40, 0.18); pointer-events: none; transition: bottom 0.28s cubic-bezier(0.2, 0.8, 0.2, 1), opacity 0.2s; }
+.heat-hud .heat-bar { height: 6px; }
+body[data-snap='full'] .heat-hud { opacity: 0; }
+@media (prefers-color-scheme: dark) {
+  .heat-hud { background: rgba(32, 32, 36, 0.9); color: #f2f2f7; }
+}
+
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation-duration: 0.01ms !important; transition-duration: 0.01ms !important; }
 }

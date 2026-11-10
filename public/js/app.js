@@ -13,6 +13,9 @@ import { drivingCardHtml, routeLabelHtml, midPoint, quickPicks } from './lib/rou
 import { weatherCardHtml, arrivalWeatherHtml } from './lib/weather.js';
 import { loadFuelPrefs, saveFuelPrefs, energyCost, totalTripCost, fuelSummary, FUEL_DEFAULTS, EV_DEFAULTS } from './lib/fuel.js';
 import { createWorldCoverFlexible, WORLDCOVER_LEGEND, legendColor, WORLDCOVER_ATTRIBUTION } from './lib/landcover.js';
+import { loadPopulationGrid, createPopulationLayer, populationLegendHtml, populationNote, DENSITY_STOPS } from './lib/population.js';
+import { createTrafficLayer, trafficLegendHtml, TRAFFIC_LEGEND } from './lib/traffic-layer.js';
+import { filterPoints, shouldRecord, toHeatData, footprintGradient, FOOT_PRIVACY, FOOT_BACKGROUND, FOOT_RANGES } from './lib/footprint.js';
 import { createMetroLoader, collectStations } from './lib/metro-layer.js';
 import { createStore, findSamePlace } from './lib/favstore.js';
 import { transitSummary, transitDetail, esc } from './lib/transit-view.js';
@@ -57,6 +60,7 @@ const NEARBY = {
 const DEFAULT_CENTER = { lng: 119.3389, lat: 34.7603 }; // 連雲港市連雲區（GCJ-02）
 const MY_LOCATION = Object.freeze({ isCurrentLocation: true, name: '我的位置' });
 const LAYER_KEY = 'wm.layer.v3';
+const HEAT_KEY = 'wm.heat.v5';
 
 const state = {
   layer: { mode: 'standard', source: 'amap', labels: true },
@@ -79,6 +83,7 @@ const state = {
   view: 'search',
   placeFrom: 'search',
   pitch3d: false,
+  heat: { pop: false, popOpacity: 70, traffic: false, foot: false, footRec: false, footRange: '7d' },
   areaMode: false, // 搜尋結果是否跟著地圖範圍自動更新
   lastQuery: '',
   avoidHighway: false,
@@ -352,6 +357,28 @@ function loadLayerPref() {
     /* 略過 */
   }
 }
+function loadHeatPref() {
+  try {
+    const v = JSON.parse(localStorage.getItem(HEAT_KEY) || 'null');
+    if (!v) return;
+    state.heat.pop = !!v.pop;
+    state.heat.traffic = !!v.traffic;
+    state.heat.foot = !!v.foot;
+    state.heat.footRec = !!v.footRec;
+    if (FOOT_RANGES.some((r) => r.id === v.footRange)) state.heat.footRange = v.footRange;
+    const opacity = Number(v.popOpacity);
+    if (opacity >= 20 && opacity <= 90) state.heat.popOpacity = opacity;
+  } catch {
+    /* 略過 */
+  }
+}
+function saveHeatPref() {
+  try {
+    localStorage.setItem(HEAT_KEY, JSON.stringify(state.heat));
+  } catch {
+    /* 無痕模式 */
+  }
+}
 const googleReachable = createReachProbe();
 let layerSeq = 0;
 async function applyLayer() {
@@ -423,16 +450,7 @@ async function applyLayer() {
   }
 
   $('landcover-legend').classList.toggle('hidden', L.mode !== 'landcover');
-  const attrib = $('map-attrib');
-  attrib.textContent =
-    L.mode === 'landcover' ? '© ESA WorldCover 2021 · CC BY 4.0'
-    : L.mode === 'terrain' && terrainSrc === 'google' ? GOOGLE_ATTRIBUTION
-    : L.mode === 'terrain' && tdtOk ? TIANDITU_ATTRIBUTION
-    : globalSat && tdtOk ? TIANDITU_ATTRIBUTION
-    : L.mode === 'satellite' && L.source === 'mapbox' ? MAPBOX_ATTRIBUTION
-    : L.mode === 'satellite' && L.source === 'google' ? GOOGLE_ATTRIBUTION
-    : '';
-  attrib.classList.toggle('on', !!attrib.textContent);
+  updateAttrib();
   if (L.mode === 'transit') showMetro();
   else hideMetro();
   try {
@@ -476,6 +494,29 @@ $('opt-labels').addEventListener('click', () => {
   state.layer.labels = !state.layer.labels;
   applyLayer();
 });
+
+function updateAttrib() {
+  const L = state.layer;
+  const f = state.config?.features || {};
+  const tdtOk = !!f.tianditu && !!state.config?.tianditu?.tk;
+  const globalSat = L.mode === 'satellite' && L.source === 'tianditu';
+  const terrainSrc = state.terrainSource;
+  const base =
+    L.mode === 'landcover' ? '© ESA WorldCover 2021 · CC BY 4.0'
+    : L.mode === 'terrain' && terrainSrc === 'google' ? GOOGLE_ATTRIBUTION
+    : L.mode === 'terrain' && tdtOk ? TIANDITU_ATTRIBUTION
+    : globalSat && tdtOk ? TIANDITU_ATTRIBUTION
+    : L.mode === 'satellite' && L.source === 'mapbox' ? MAPBOX_ATTRIBUTION
+    : L.mode === 'satellite' && L.source === 'google' ? GOOGLE_ATTRIBUTION
+    : '';
+  const parts = [];
+  if (base) parts.push(base);
+  if (state.heat.pop) parts.push('人口 Chen et al. 2024 · CC BY 4.0 · 2020 靜態估計');
+  if (state.heat.traffic) parts.push('路況 © 高德地圖');
+  const attrib = $('map-attrib');
+  attrib.textContent = parts.join(' · ');
+  attrib.classList.toggle('on', !!attrib.textContent);
+}
 
 /* ---- 大眾運輸圖層：城市地鐵／輕軌／磁浮（OpenStreetMap，依各線顏色；資料分格子按需載入） ---- */
 const metro = createMetroLoader();
@@ -1849,6 +1890,7 @@ async function syncNow({ quiet = false } = {}) {
     if (e.status === 401) {
       state.user = null;
       renderAccount();
+      onHeatAuth();
     }
     if (!quiet) setStatus('account-status2', e.message || '同步失敗', true);
   }
@@ -1888,6 +1930,7 @@ $('code-form').addEventListener('submit', async (e) => {
     $('login-code').value = '';
     $('code-form').classList.add('hidden');
     renderAccount();
+    onHeatAuth();
     setStatus('account-status2', '登入成功，同步中…');
     await syncNow();
   } catch (err) {
@@ -1910,6 +1953,7 @@ $('btn-logout').addEventListener('click', async () => {
   }
   state.user = null;
   renderAccount();
+  onHeatAuth();
   setStatus('account-status2', '已登出（這台裝置上的收藏仍保留）');
 });
 async function loadAccount() {
@@ -1921,6 +1965,7 @@ async function loadAccount() {
   }
   renderAccount();
   if (state.user) syncNow({ quiet: true });
+  onHeatAuth();
 }
 
 /* ---------------- 分享位置／標記我的位置 ---------------- */
@@ -1964,9 +2009,241 @@ async function markMyLocation() {
   openShare({ lng: me.lng, lat: me.lat, name: '我的位置' });
 }
 
+/* ---------------- 熱力圖：人口密度、即時路況、我的足跡 ---------------- */
+let popLayer = null;
+let popGrid = null;
+let trafficLayer = null;
+let footHeat = null;
+let footWatch = null;
+let footPoints = [];
+let footLastSent = null;
+let heatSeq = 0;
+let footLoadedFor = null;
+
+function mapHas(layer) {
+  try {
+    return (view?.map.getLayers?.() ?? []).includes(layer);
+  } catch {
+    return false;
+  }
+}
+function addMapLayer(layer) {
+  if (layer && view && !mapHas(layer)) view.map.add(layer);
+}
+function removeMapLayer(layer) {
+  if (layer && view && mapHas(layer)) view.map.remove(layer);
+}
+function loadHeatPlugin(AMap) {
+  if (AMap.HeatMap) return Promise.resolve(AMap.HeatMap);
+  return new Promise((resolve, reject) => {
+    AMap.plugin(['AMap.HeatMap'], () => (AMap.HeatMap ? resolve(AMap.HeatMap) : reject(new Error('熱力圖元件載入失敗'))));
+  });
+}
+function renderHeat() {
+  const h = state.heat;
+  const logged = !!state.user;
+  $('opt-pop').setAttribute('aria-checked', String(h.pop));
+  $('opt-traffic').setAttribute('aria-checked', String(h.traffic));
+  $('opt-foot').setAttribute('aria-checked', String(h.foot));
+  $('opt-foot-rec').setAttribute('aria-checked', String(h.footRec && logged));
+  $('pop-opacity').value = String(h.popOpacity);
+  $('pop-extra').classList.toggle('hidden', !h.pop);
+  $('traffic-legend').classList.toggle('hidden', !h.traffic);
+  $('foot-extra').classList.toggle('hidden', !h.foot);
+  $('foot-login').classList.toggle('hidden', !h.foot || logged);
+  $('foot-tools').classList.toggle('hidden', !h.foot || !logged);
+  document.querySelectorAll('#foot-range [data-range]').forEach((b) => b.setAttribute('aria-checked', String(b.dataset.range === h.footRange)));
+  const hudOn = h.pop || h.traffic;
+  $('heat-hud').classList.toggle('hidden', !hudOn);
+  $('heat-hud-pop').classList.toggle('hidden', !h.pop);
+  $('heat-hud-traffic').classList.toggle('hidden', !h.traffic);
+  updateAttrib();
+}
+async function syncFootHeat() {
+  if (!view || !state.heat.foot || !state.user) {
+    footHeat?.hide?.();
+    return;
+  }
+  const Heat = await loadHeatPlugin(view.AMap);
+  if (!footHeat) {
+    footHeat = new Heat(view.map, {
+      radius: 28,
+      opacity: [0, 0.85],
+      gradient: footprintGradient(),
+      zooms: [3, 20],
+      zIndex: 90,
+    });
+  }
+  const shown = filterPoints(footPoints, state.heat.footRange);
+  const { data, max } = toHeatData(shown, wgs84ToGcj02);
+  footHeat.setDataSet({ data, max });
+  footHeat.show();
+}
+async function refreshFootprint() {
+  if (!state.user) {
+    footPoints = [];
+    footLoadedFor = null;
+    return;
+  }
+  const out = await api.footprint();
+  footPoints = Array.isArray(out.points) ? out.points : [];
+  footLoadedFor = state.user.email;
+}
+function syncRecorder() {
+  const want = !!(state.heat.footRec && state.user && document.visibilityState !== 'hidden' && navigator.geolocation);
+  if (!want) {
+    if (footWatch != null) navigator.geolocation.clearWatch(footWatch);
+    footWatch = null;
+    return;
+  }
+  if (footWatch != null) return;
+  footWatch = navigator.geolocation.watchPosition(
+    (pos) => {
+      const next = { lng: pos.coords.longitude, lat: pos.coords.latitude, t: Date.now() };
+      if (!shouldRecord(footLastSent, next, next.t)) return;
+      const pending = next;
+      api.footprintAdd([pending]).then((out) => {
+        footLastSent = pending;
+        if (Array.isArray(out.points)) footPoints = out.points;
+        if (state.heat.foot) syncFootHeat().catch(() => {});
+      }).catch((e) => {
+        if (e.status === 401 || e.code === 'login_required') {
+          state.heat.footRec = false;
+          state.user = null;
+          saveHeatPref();
+          syncRecorder();
+          renderAccount();
+          renderHeat();
+          toast('登入已失效，已停止記錄足跡');
+        }
+      });
+    },
+    () => {
+      state.heat.footRec = false;
+      saveHeatPref();
+      syncRecorder();
+      renderHeat();
+      toast('沒有取得定位權限，已關閉記錄');
+    },
+    { enableHighAccuracy: true, maximumAge: 15000, timeout: 25000 },
+  );
+}
+async function applyHeat() {
+  const seq = ++heatSeq;
+  renderHeat();
+  if (!view) {
+    syncRecorder();
+    return;
+  }
+  try {
+    if (state.heat.pop) {
+      if (!popGrid) popGrid = await loadPopulationGrid();
+      if (seq !== heatSeq) return;
+      $('pop-note').textContent = populationNote(popGrid);
+      if (!popLayer) popLayer = createPopulationLayer(view.AMap, popGrid, { opacity: state.heat.popOpacity / 100 });
+      popLayer.setOpacity?.(state.heat.popOpacity / 100);
+      addMapLayer(popLayer);
+    } else if (popLayer) {
+      removeMapLayer(popLayer);
+    }
+    if (state.heat.traffic) {
+      if (!trafficLayer) trafficLayer = createTrafficLayer(view.AMap);
+      addMapLayer(trafficLayer);
+    } else if (trafficLayer) {
+      removeMapLayer(trafficLayer);
+    }
+    if (state.heat.foot && state.user) {
+      if (footLoadedFor !== state.user.email) await refreshFootprint();
+      if (seq !== heatSeq) return;
+      await syncFootHeat();
+    } else {
+      footHeat?.hide?.();
+    }
+  } catch (e) {
+    if (seq === heatSeq) toast(e.message || '熱力圖載入失敗');
+  }
+  if (seq === heatSeq) syncRecorder();
+}
+function onHeatAuth() {
+  if (!state.user) {
+    footPoints = [];
+    footLoadedFor = null;
+    footLastSent = null;
+  }
+  applyHeat();
+}
+$('pop-legend').innerHTML = populationLegendHtml();
+$('pop-note').textContent = populationNote(null);
+$('traffic-legend').innerHTML = trafficLegendHtml();
+$('heat-hud-traffic').innerHTML = TRAFFIC_LEGEND.map((s) => `<span class="tl"><i style="background:${s.color}"></i>${s.name}</span>`).join('');
+$('heat-hud-pop-bar').style.background = `linear-gradient(90deg,${DENSITY_STOPS.map((s) => s.hex).join(',')})`;
+$('foot-bg-note').textContent = FOOT_BACKGROUND;
+$('foot-privacy').textContent = FOOT_PRIVACY;
+$('opt-pop').addEventListener('click', () => {
+  state.heat.pop = !state.heat.pop;
+  saveHeatPref();
+  applyHeat();
+});
+$('opt-traffic').addEventListener('click', () => {
+  state.heat.traffic = !state.heat.traffic;
+  saveHeatPref();
+  applyHeat();
+});
+$('opt-foot').addEventListener('click', () => {
+  state.heat.foot = !state.heat.foot;
+  saveHeatPref();
+  applyHeat();
+});
+$('opt-foot-rec').addEventListener('click', () => {
+  if (!state.user) {
+    toast('請先登入。足跡只會記在你自己的帳號');
+    return;
+  }
+  state.heat.footRec = !state.heat.footRec;
+  saveHeatPref();
+  renderHeat();
+  syncRecorder();
+  if (state.heat.footRec) toast('開始記錄足跡。這個分頁在背景或關掉後就不會再記。');
+});
+$('pop-opacity').addEventListener('input', () => {
+  const n = Number($('pop-opacity').value);
+  if (!Number.isFinite(n)) return;
+  state.heat.popOpacity = n;
+  popLayer?.setOpacity?.(n / 100);
+  saveHeatPref();
+});
+$('foot-range').addEventListener('click', (e) => {
+  const b = e.target.closest('[data-range]');
+  if (!b) return;
+  state.heat.footRange = b.dataset.range;
+  saveHeatPref();
+  renderHeat();
+  syncFootHeat().catch(() => {});
+});
+$('foot-login-btn').addEventListener('click', () => {
+  $('layer-modal').classList.add('hidden');
+  openAccount();
+});
+$('foot-clear').addEventListener('click', async () => {
+  if (!state.user) return;
+  if (!confirm('清除這個帳號上的全部足跡？清除後無法還原。')) return;
+  try {
+    await api.footprintClear();
+    footPoints = [];
+    footLastSent = null;
+    await syncFootHeat();
+    toast('已清除我的足跡');
+  } catch (e) {
+    toast(e.message || '清除失敗');
+  }
+});
+document.addEventListener('visibilitychange', () => syncRecorder());
+
 /* ---------------- 啟動 ---------------- */
-window.__worldMap = { vvState, state, view: null, assignStop, planRoute, doSearch, setSnap, openRoute, setMode, runNearby, openShare, openAccount, store, showPlace, selectPoint, showMyLocationCard, set3D, applyLayer, refreshEnv, env, envState };
+window.__worldMap = { vvState, state, view: null, assignStop, planRoute, doSearch, setSnap, openRoute, setMode, runNearby, openShare, openAccount, store, showPlace, selectPoint, showMyLocationCard, set3D, applyLayer, applyHeat, refreshEnv, env, envState };
 loadLayerPref();
+loadHeatPref();
+renderHeat();
 showSearchHome();
 setSnap('peek');
 function onViewportChange() {
@@ -1989,6 +2266,7 @@ renderFavs();
   renderAccount();
   loadAccount();
   await initMap();
+  applyHeat();
   if (navigator.permissions?.query) {
     navigator.permissions
       .query({ name: 'geolocation' })

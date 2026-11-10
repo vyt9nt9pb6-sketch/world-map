@@ -37,6 +37,7 @@ import { createRailMatcher } from './rail.js';
 import railData from './rail-data.js';
 import { requestCode, verifyCode, logout, me, assertSameOrigin } from './auth.js';
 import { getFavorites, syncFavorites } from './favorites.js';
+import { getFootprint, postFootprint, deleteFootprint } from './footprint.js';
 import { getConfig, amapServiceProxy, createGoogleTileSession } from './config.js';
 
 const AMAP_BASE = 'https://restapi.amap.com';
@@ -504,6 +505,7 @@ const ROUTES = {
   '/api/auth/me': { GET: raw(me) },
   '/api/favorites': { GET: raw(getFavorites) },
   '/api/favorites/sync': { POST: raw(syncFavorites, true) },
+  '/api/footprint': { GET: raw(getFootprint), POST: raw(postFootprint, true), DELETE: raw(deleteFootprint, true) },
 };
 
 function originAllowed(request, env) {
