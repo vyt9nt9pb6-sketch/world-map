@@ -1,9 +1,64 @@
-# World Map v4
+# World Map v5
 
 **線上版（固定網址）：https://world-map.kwok-worldmap.workers.dev**
 
 給長途自駕用的網頁地圖：高德高清底圖、搜尋、駕車路線（含過路費）、一鍵交給高德地圖／Apple 地圖導航。
 手機（iPhone Safari）優先，桌機也能用；之後可以包成 App。
+
+## v5（熱力圖：人口密度、即時路況、我的足跡）
+
+圖層面板「熱力」區新增三個開關，跟既有的標準／衛星／地形／大眾運輸底圖一起用（可以疊在任何底圖上）。介面仍是 Liquid Glass，圖例放在面板裡，地圖左下也有一小條（不用再疊一層模糊，避免 iPhone 掉幀）。
+
+### A. 人口密度（公開、2020 靜態估計）
+
+**採用 Chen et al. 2024 第七次人口普查 100 m 網格，不是 WorldPop／GHSL。** 資料在 figshare 公開，授權是 **CC BY 4.0**（API 回傳 `license.name = CC BY 4.0`，不是「只寫 freely available」）。檔案 `PopSE_China2020_100m.rar`（約 126 MB，MD5 `f020e67062b6368672428a891b07e84e`）可下載，所以沒有改用備援資料。
+
+- 論文：<https://essd.copernicus.org/articles/16/3705/2024/>
+- 資料：<https://doi.org/10.6084/m9.figshare.24916140>
+- 請這樣引用：Chen, Yuehong; Xu, Congcong; Ge, Yong; Zhang, Xiaoxiang; Zhou, Ya'nan (2024). A 100-m gridded population dataset of China’s seventh census using ensemble learning and geospatial big data. figshare. Dataset. https://doi.org/10.6084/m9.figshare.24916140.v1
+
+原始檔是 Albers／Krasovsky、每格人數（100×100 m，NoData 32767）。整張拿去 `gdalwarp` 會一次吃掉數 GB，所以 `scripts/build-pop-grid.py` 逐列讀、把人數加總到 0.01° 的 WGS-84 網格（加總後全國約 **13.92 億人**，與七普大陸人口同一量級；港澳台不在這份網格裡）。再編成 `log2×14` 的 uint8，gzip 後要能放進 Worker。**0.01°（約 1 公里）整張約 22 MB，gzip 後仍太大**；目前提交的是再加總一倍的 **0.02°（約 2 公里）**，`public/data/pop/china2020.bin.gz` 約 **1.1 MB**。畫面上會寫「約 2 公里（由 100 公尺普查格子加總）」。這是 2020 年的靜態估計，**不是即時人流**。
+
+座標：網格是 WGS-84。高德底圖在中國境內是 GCJ-02，每個人口格子先轉成 GCJ 再畫；`outOfChina` 為真時轉換是恆等。原始投影沒有 TOWGS84 參數，角座標直接當成 WGS-84，誤差大約幾十公尺，小於 2 公里的顯示格子。全國很小的縮放會把多格合併、取較高值，避免城市消失；城市尺度用的是格子本身的人/km²。
+
+圖例單位是 **人/km²**（1、10、50、200、500、1千、5千、2萬+），有透明度滑桿，面板與地圖上都有「2020 靜態估計」與來源。
+
+重製資料（不需把 126 MB 的 rar 放進 git）：
+
+```bash
+# 官方 unrar 解出 PopSE_China2020_100m.tif 之後
+python3 scripts/build-pop-grid.py /path/to/PopSE_China2020_100m.tif
+```
+
+### B. 即時路況（公開）
+
+圖層開關「即時路況」使用高德 JS API 2.0 的 `AMap.TileLayer.Traffic`，`autoRefresh: true`、`interval: 180`（約每 3 分鐘）。圖例：暢通／緩行／擁堵／嚴重擁堵（顏色對齊高德路況圖磚）。沿用已經設定的 `AMAP_JS_KEY`，沒有新的金鑰。路況圖磚仍由瀏覽器直連高德。
+
+### C. 我的足跡（私人）
+
+登入後才看得到、才記得到。位置存在既有的 `WM_KV`，鍵是 `fp:{uid}`（uid 是 session 裡的 HMAC，請求不能指定別人）。`GET/POST/DELETE /api/footprint` 都要有效 session；寫入與刪除還要同源。回應 `cache-control: no-store`，不含 email、不含 uid。沒有「列出所有人」的路由，帶 `?uid=` 也不會換成別人。
+
+- **記錄足跡**預設關閉。打開之後，只用頁面在前景時的 `watchPosition`（移動約 40 公尺或停留滿 30 秒記一筆）。**網頁關掉、或分頁在背景，瀏覽器就不會繼續定位**——這不是 App，做不到背景追蹤。
+- 時間範圍：今天／7 天／30 天／全部。熱力用 `AMap.HeatMap`，座標先轉 GCJ-02（境外不轉）；顏色越熱代表在那附近被記到越多次。
+- **清除我的足跡**會刪掉這個帳號在 KV 裡的全部點，不能還原。
+- 未登入時開關只顯示「請登入」，不會向伺服器要資料，也不會開定位。
+- 每人最多 3000 點、一次最多 40 點、每小時最多 180 次寫入。幾乎同一點的 GPS 抖動（15 秒內、20 公尺內）不會另存。
+
+### 部署與 Kwok 要設定的東西
+
+**沒有新的 Secret，也不需要 R2。** 人口網格是靜態檔，跟網站一起部署。足跡用原本的 `WM_KV`。路況與足跡熱力用原本的 `AMAP_JS_KEY`／`AMAP_JS_SECURITY_CODE`。
+
+重新部署時仍要帶著 KV，否則登入與足跡會一起被拿掉：
+
+```bash
+CF_KV_NAMESPACE_ID=<KV id> node scripts/deploy-cloudflare.mjs
+```
+
+Vercel 沒有 KV，跟收藏一樣：人口密度與路況可以用，足跡登入不能用。
+
+### v5 測試與截圖
+
+`npm test`（含 `tests/v5-population.test.js`、`tests/v5-footprint.test.js`、`tests/v5-frontend.test.js`）。截圖：`node scripts/screenshots-v5.mjs`（本機靜態檔＋線上 `/api`；足跡在截圖腳本裡模擬登入，不會寫進正式 KV）→ `screenshots/v5-*.png`。
 
 ## v4（Liquid Glass、圖層網格、地點頁、多路線）
 
@@ -258,8 +313,13 @@ public/                 前端（純靜態檔，無需編譯）
   js/lib/env-provider.js 海拔／氣壓提供者介面
   js/lib/navlinks.js    高德／Apple 導航連結
   js/lib/api.js         呼叫自家 /api（前端完全沒有金鑰）
+  js/lib/population.js  2020 人口密度（Chen et al.，只在中國境內做 GCJ 偏移）
+  js/lib/traffic-layer.js 高德即時路況
+  js/lib/footprint.js   我的足跡（時間範圍、熱力資料）
+  data/pop/             china2020.bin.gz（約 2 公里網格，CC BY 4.0）
 core/                   後端邏輯（平台無關：標準 Fetch Request → Response）
-  handlers.js           /api/search、/api/geocode、/api/route、/api/weather（Open-Meteo）等
+  handlers.js           /api/search、/api/geocode、/api/route、/api/weather、/api/footprint 等
+  footprint.js          登入者自己的足跡（KV，不公開）
   validate.js           參數白名單與驗證
   mapping.js            高德回應 → 精簡 JSON
   ratelimit.js          每個 IP 的限流
@@ -372,4 +432,4 @@ npm run screenshots        # 無頭 Chrome 截圖（iPhone 390×844@3x、桌機 
 - iPhone 上「沒裝高德 App 就改開網頁」是用 1.6 秒計時判斷，少數情況 Safari 會先跳出「無法開啟網址」提示。
 - 高德 Web 服務個人開發者每日配額有限，超過時介面會顯示「今天的查詢次數已達上限」。
 - 圖磚直接從高德伺服器載入（不經過我們的伺服器），屬於高德網頁地圖的公開圖磚，非正式授權的 API；高德若改網址需更新 `public/js/lib/layers.js`。
-- 尚未包含：離線地圖／離線導航（刻意不做）；天氣與油費／電費估算已在 v4.2 加入（油價為參考值、油耗是線性估算，見 v4.2 說明）。程式已預留：後端在 `core/handlers.js` 的 `ROUTES` 加新端點，前端在 `public/js/lib/api.js` 加函式、`app.js` 加新的面板即可。
+- 尚未包含：離線地圖／離線導航（刻意不做）；天氣與油費／電費估算已在 v4.2 加入（油價為參考值、油耗是線性估算，見 v4.2 說明）；人口密度、即時路況與我的足跡熱力已在 v5 加入。程式已預留：後端在 `core/handlers.js` 的 `ROUTES` 加新端點，前端在 `public/js/lib/api.js` 加函式、`app.js` 加新的面板即可。

@@ -74,6 +74,9 @@ export const api = {
   logout: () => send('POST', '/api/auth/logout', {}),
   favorites: () => get('/api/favorites', {}),
   syncFavorites: (items) => send('POST', '/api/favorites/sync', { items }),
+  footprint: () => get('/api/footprint', {}),
+  footprintAdd: (points) => send('POST', '/api/footprint', { points }),
+  footprintClear: () => send('DELETE', '/api/footprint'),
   route: ({ start, dest, via = [], strategy, mode = 'driving', avoidHighway, avoidToll, depart }, opts) =>
     get(
       '/api/route',

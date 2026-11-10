@@ -61,6 +61,10 @@
     <!-- 比例尺（左下，面板之上） -->
     <button type="button" id="area-btn" class="area-btn hidden"><svg class="ic"><use href="#i-search" /></svg><span>搜尋此區域</span></button>
     <div class="map-attrib" id="map-attrib" aria-hidden="true"></div>
+    <div id="heat-hud" class="heat-hud hidden" aria-live="polite">
+      <div id="heat-hud-pop" class="hidden"><span id="heat-hud-pop-bar" class="heat-bar"></span><span>人/km² · 2020 靜態估計</span></div>
+      <div id="heat-hud-traffic" class="hidden"></div>
+    </div>
     <div class="scale" id="scale" aria-hidden="true"><div class="scale-bar" id="scale-bar"></div><span id="scale-label"></span></div>
 
     <!-- 底部面板 -->
@@ -116,7 +120,7 @@
           <div id="search-status" class="status" role="status" aria-live="polite"></div>
           <ul id="results" class="list card"></ul>
         </div>
-        <p class="credits">地圖 © 高德地圖；地鐵／輕軌線路 © <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap contributors</a>（ODbL）；氣象資料 <a href="https://open-meteo.com/" target="_blank" rel="noopener">Open-Meteo</a>（CC BY 4.0）</p>
+        <p class="credits">地圖 © 高德地圖；地鐵／輕軌線路 © <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap contributors</a>（ODbL）；氣象資料 <a href="https://open-meteo.com/" target="_blank" rel="noopener">Open-Meteo</a>（CC BY 4.0）；人口密度 Chen et al. 2024 第七次人口普查 100 m 網格（<a href="https://creativecommons.org/licenses/by/4.0/" target="_blank" rel="noopener">CC BY 4.0</a>，2020 靜態估計）</p>
       </div>
 
       <!-- 地點卡（Apple 地圖風格） -->
@@ -309,6 +313,48 @@
           <div id="landcover-legend" class="lc-legend hidden" aria-label="地表覆蓋圖例">
             <ul id="lc-legend-list"></ul>
             <p class="muted small" id="lc-attrib"></p>
+          </div>
+        </div>
+        <!-- 熱力圖：人口密度（2020 靜態）、高德即時路況、我的足跡 -->
+        <div id="layer-heat" class="card layer-opts" data-section="heat">
+          <span class="opt-title">熱力圖</span>
+          <div class="opt-row">
+            <div class="opt-text"><span>人口密度</span><small class="muted">2020 年靜態估計，不是即時人流。</small></div>
+            <button type="button" class="switch" id="opt-pop" role="switch" aria-checked="false" aria-label="人口密度熱力"><i></i></button>
+          </div>
+          <div id="pop-extra" class="heat-extra hidden">
+            <label class="heat-slider"><span>透明度</span><input id="pop-opacity" type="range" min="20" max="90" value="70" aria-label="人口密度透明度" /></label>
+            <div id="pop-legend" class="heat-legend" aria-label="人口密度圖例，單位人每平方公里"></div>
+            <p class="muted small" id="pop-note"></p>
+          </div>
+          <div class="opt-row">
+            <div class="opt-text"><span>即時路況</span><small class="muted">高德路況，約每 3 分鐘自動更新。</small></div>
+            <button type="button" class="switch" id="opt-traffic" role="switch" aria-checked="false" aria-label="即時路況"><i></i></button>
+          </div>
+          <div id="traffic-legend" class="heat-legend hidden" aria-label="路況圖例"></div>
+          <div class="opt-row">
+            <div class="opt-text"><span>我的足跡</span><small class="muted">只顯示你自己的位置紀錄。</small></div>
+            <button type="button" class="switch" id="opt-foot" role="switch" aria-checked="false" aria-label="我的足跡熱力"><i></i></button>
+          </div>
+          <div id="foot-extra" class="heat-extra hidden">
+            <div id="foot-login" class="heat-login">
+              <p>登入後才能記錄與查看自己的足跡。未登入不會顯示這層，也不會記錄位置。</p>
+              <button type="button" class="btn-fill" id="foot-login-btn">登入</button>
+            </div>
+            <div id="foot-tools" class="hidden">
+              <div class="opt-row">
+                <div class="opt-text"><span>記錄足跡</span><small class="muted" id="foot-bg-note"></small></div>
+                <button type="button" class="switch" id="opt-foot-rec" role="switch" aria-checked="false" aria-label="記錄足跡"><i></i></button>
+              </div>
+              <div class="seg-ctl foot-range" id="foot-range" role="radiogroup" aria-label="足跡時間範圍">
+                <button type="button" role="radio" data-range="day" aria-checked="false">今天</button>
+                <button type="button" role="radio" data-range="7d" aria-checked="true">7 天</button>
+                <button type="button" role="radio" data-range="30d" aria-checked="false">30 天</button>
+                <button type="button" role="radio" data-range="all" aria-checked="false">全部</button>
+              </div>
+              <p class="muted small" id="foot-privacy"></p>
+              <button type="button" class="btn-tint danger" id="foot-clear">清除我的足跡</button>
+            </div>
           </div>
         </div>
       </div>
