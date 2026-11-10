@@ -23,9 +23,9 @@
 | --- | --- | --- | --- |
 | 小（全國） | `c.bin.gz` | 約 4 公里（0.04°） | Worker 靜態檔 |
 | 城市（沒上傳細圖磚時） | `b.bin.gz` | 約 2 公里（0.02°） | Worker 靜態檔 |
-| 城市放大 | `m/` | 約 1 公里（0.01°） | 選用 R2 `WM_POP` |
-| 再放大 | `f/` | 約 500 公尺（0.005°） | 選用 R2 `WM_POP` |
-| 最大 | `n/` | 約 100 公尺（0.001°） | 選用 R2 `WM_POP` |
+| 城市放大 | `m/` | 約 1 公里（0.01°） | R2 `WM_POP`（`world-map-pop`） |
+| 再放大 | `f/` | 約 500 公尺（0.005°） | R2 `WM_POP`（`world-map-pop`） |
+| 最大 | `n/` | 約 100 公尺（0.001°） | R2 `WM_POP`（`world-map-pop`） |
 
 舊的單檔 `china2020.bin.gz`（0.02°）已拿掉。熱力半徑與透明度跟縮放一起變，放大時格子較清楚，不會一直是一大團。這是 2020 年的靜態估計，**不是即時人流**。
 
@@ -58,15 +58,15 @@ python3 scripts/build-pop-tiles.py /path/to/PopSE_China2020_100m.tif
 
 ### 部署與 Kwok 要設定的東西
 
-足跡用原本的 `WM_KV`。路況與足跡熱力用原本的 `AMAP_JS_KEY`／`AMAP_JS_SECURITY_CODE`。人口密度：縮小看是約 4 公里（`c.bin.gz`），沒有細圖磚時城市仍是約 2 公里（`b.bin.gz`，跟現在線上一樣，跟網站一起部署）。放大到約 1 公里（`m/`）、500 公尺（`f/`）、100 公尺（`n/`）時，手機只抓畫面裡的幾塊。這三級 gzip 後大約 3 MB、9 MB、74 MB，塞進 Worker 腳本會超過上傳上限，所以沒有打包；沒上傳時會自動退回已載入的較粗一級，不會壞掉。要細過 2 公里：
+足跡用原本的 `WM_KV`。路況與足跡熱力用原本的 `AMAP_JS_KEY`／`AMAP_JS_SECURITY_CODE`。人口密度：縮小看是約 4 公里（`c.bin.gz`），城市在細圖磚還沒載入時是約 2 公里（`b.bin.gz`，跟網站一起部署）。放大到約 1 公里（`m/`）、500 公尺（`f/`）、100 公尺（`n/`）時，手機只抓畫面裡的幾塊。這三級沒有打包進 Worker。正式環境的 R2 bucket `world-map-pop` 已放全部 1,491 塊，Worker 綁定是 `WM_POP`。沒有這塊圖磚時會退回已載入的較粗一級。
+
+物件鍵是 `data/pop/m/….bin.gz`、`data/pop/f/….bin.gz`、`data/pop/n/….bin.gz`（內容是 gzip，`content-type` 用 `application/gzip`）。重傳圖磚：
 
 ```bash
-npx wrangler r2 bucket create world-map-pop
-# Worker → Settings → Bindings → R2 bucket，變數名稱填 WM_POP
 sh scripts/upload-pop-native.sh world-map-pop
 ```
 
-上傳的物件鍵是 `data/pop/m/….bin.gz`、`data/pop/f/….bin.gz`、`data/pop/n/….bin.gz`（內容是 gzip，`content-type` 用 `application/gzip`）。下次若用本倉庫的 deploy 腳本重新部署，`keep_bindings` 只有 `secret_text` 和 `plain_text`，**會拿掉你後來加的 R2 綁定**。加好 `WM_POP` 之後，請在 `scripts/deploy-cloudflare.mjs` 的 `keep_bindings` 補上 `'r2_bucket'` 再產生部署檔，否則細圖磚會在下一次部署消失。這次產生的部署檔**沒有**加上 R2，避免 bucket 還不存在時部署失敗。
+`scripts/deploy-cloudflare.mjs` 產生的部署檔會帶上 `{ type: 'r2_bucket', name: 'WM_POP', bucket_name: 'world-map-pop' }`，`keep_bindings` 也含 `r2_bucket`。之後重新部署不會拿掉 `WM_POP`。
 
 重新部署時仍要帶著 KV，否則登入與足跡會一起被拿掉：
 
@@ -105,7 +105,7 @@ Vercel 沒有 KV，跟收藏一樣：人口密度與路況可以用，足跡登�
 1. 登入 https://dash.cloudflare.com → Workers & Pages → `world-map` → Settings → Variables and Secrets。
 2. 新增 Secret（類型選 Secret，不是 Text）：`AMAP_KEY`（高德 Web 服務 Key）、`AMAP_JS_KEY`、`AMAP_JS_SECURITY_CODE`，以及需要的 `TIANDITU_TK`、`MAPBOX_TOKEN`、`GOOGLE_MAPS_TILE_KEY`。設定後不需要重新部署。
 3. KV：Storage & Databases → KV → Create，建立後在 Worker → Settings → Bindings 綁成 `WM_KV`。
-4. 重新部署時**必須保留綁定**：`CF_KV_NAMESPACE_ID=<KV id> node scripts/deploy-cloudflare.mjs`，再執行產生的 `.run/cf-deploy.js`（`keep_bindings: ['secret_text','plain_text']`，漏了 KV id 會讓 `WM_KV` 被拿掉）。
+4. 重新部署時**必須保留綁定**：`CF_KV_NAMESPACE_ID=<KV id> node scripts/deploy-cloudflare.mjs`，再執行產生的 `.run/cf-deploy.js`。漏了 KV id 會讓 `WM_KV` 被拿掉。`WM_POP`（R2 bucket `world-map-pop`）寫在部署檔裡，也在 `keep_bindings` 的 `r2_bucket`，不會被拿掉。
 
 **2. Google Cloud — Map Tiles API 金鑰（地形用）**
 1. 開 https://console.cloud.google.com ，建立或選一個專案，並綁定帳單帳戶（Map Tiles 需要，有免費額度）。
@@ -312,7 +312,7 @@ window.WorldMapEnv.registerProvider({
 CF_KV_NAMESPACE_ID=<KV id> node scripts/deploy-cloudflare.mjs    # 產生 .run/cf-deploy.js（含 WM_KV 綁定）
 # 由 Grok Bot 的 Cloudflare 連接器執行 .run/cf-deploy.js
 ```
-部署中繼資料使用 `keep_bindings: ['secret_text','plain_text']`，**不會覆蓋已存在的秘密（AMAP_KEY 等）**。部署後請確認綁定名稱仍在，並用 `npm run check:api -- https://world-map.kwok-worldmap.workers.dev` 驗證。
+部署中繼資料使用 `keep_bindings: ['secret_text','plain_text','r2_bucket']`，**不會覆蓋已存在的秘密（AMAP_KEY 等）**，也不會拿掉 R2。綁定清單另有明確的 `WM_POP` → bucket `world-map-pop`。部署後請確認綁定名稱仍在，並用 `npm run check:api -- https://world-map.kwok-worldmap.workers.dev` 驗證。
 Vercel 部署不支援登入與收藏同步（沒有 KV 綁定），其他功能可用。
 
 ### 資料與授權
@@ -432,7 +432,7 @@ npm run screenshots        # 無頭 Chrome 截圖（iPhone 390×844@3x、桌機 
   node scripts/deploy-cloudflare.mjs      # 打包，產生 .run/cf-deploy.js（不含金鑰）
   ```
   然後由 Grok Bot 用 Cloudflare 連接器執行：`execute {"code": "$file:/workspace/world-map/.run/cf-deploy.js"}`。
-  重新部署會保留 `AMAP_KEY` 秘密（`keep_bindings: secret_text`），不需要重設。
+  重新部署會保留 `AMAP_KEY` 等秘密（`keep_bindings` 含 `secret_text` 與 `plain_text`），也會保留 R2：`keep_bindings` 含 `r2_bucket`，並明確綁 `WM_POP` 到 `world-map-pop`。不需要重設。
 - **設定／更換金鑰（請在 Cloudflare 網頁後台做）**：Workers & Pages → `world-map` → Settings → Variables and Secrets → `AMAP_KEY`（類型 Secret）→ Edit → 貼上高德 Web 服務 Key → Deploy。
   - Grok Bot 的連接器會自動把看起來像金鑰的字串遮蔽（變成 10 個字元的佔位字），所以無法透過連接器設定真正的金鑰——這是保護機制，不要繞過。
   - `node scripts/deploy-cloudflare.mjs --secret` 產生的 `.run/set-secret.js` 只適合在有自己 API 權杖、直接呼叫 Cloudflare API 時使用；用完立刻 `shred -u`。

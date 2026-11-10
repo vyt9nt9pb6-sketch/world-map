@@ -40,9 +40,11 @@ const metadata = {
     // 每個 IP 每 60 秒最多 60 次 /api 請求（Cloudflare Rate Limiting 綁定）
     { type: 'ratelimit', name: 'API_RATE_LIMIT', namespace_id: '1001', simple: { limit: 60, period: 60 } },
     ...(KV_ID ? [{ type: 'kv_namespace', name: 'WM_KV', namespace_id: KV_ID }] : []),
+    // 人口細圖磚。bucket 已在正式環境；明確寫上，避免只列部分 bindings 時被拿掉。
+    { type: 'r2_bucket', name: 'WM_POP', bucket_name: 'world-map-pop' },
   ],
-  // 重新部署時保留所有「秘密」（AMAP_KEY、TIANDITU_TK、AMAP_JS_*、BREVO_API_KEY…）與純文字變數，絕不覆蓋
-  keep_bindings: ['secret_text', 'plain_text'],
+  // 秘密與純文字變數不覆蓋。r2_bucket 再留一份，其他 R2 綁定也不會被這次部署清掉。
+  keep_bindings: ['secret_text', 'plain_text', 'r2_bucket'],
   observability: { enabled: false },
 };
 
@@ -64,6 +66,7 @@ const deployJs = `async () => {
 }`;
 await writeFile(join(RUN, 'cf-deploy.js'), deployJs, { mode: 0o600 });
 console.log(KV_ID ? '✔ 含 KV 綁定 WM_KV' : '⚠ 未設 CF_KV_NAMESPACE_ID：收藏／登入功能不會啟用');
+console.log('✔ 含 R2 綁定 WM_POP → world-map-pop');
 console.log(`✔ .run/cf-deploy.js（${(deployJs.length / 1024).toFixed(0)} KB，不含金鑰）`);
 
 if (process.argv.includes('--secret')) {

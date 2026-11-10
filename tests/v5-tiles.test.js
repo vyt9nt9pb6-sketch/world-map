@@ -62,6 +62,12 @@ test('足跡熱力半徑比固定 28px 更緊，放大時更清楚', () => {
   assert.ok(footprintHeatOpacity(16)[1] > footprintHeatOpacity(11)[1]);
 });
 
+test('部署腳本明確綁定 WM_POP，並保留 r2_bucket', () => {
+  const src = readFileSync(new URL('../scripts/deploy-cloudflare.mjs', import.meta.url), 'utf8');
+  assert.match(src, /type:\s*'r2_bucket',\s*name:\s*'WM_POP',\s*bucket_name:\s*'world-map-pop'/);
+  assert.match(src, /keep_bindings:\s*\[[^\]]*'r2_bucket'/);
+});
+
 test('100 m 圖磚可由 WM_POP 讀出，沒有綁定就不會擋其他路徑', async () => {
   const env = {
     WM_POP: { async get(key) {

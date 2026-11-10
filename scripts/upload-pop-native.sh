@@ -1,8 +1,8 @@
 #!/bin/sh
 # 把約 500 m（f）與約 100 m（n）的人口圖磚上傳到 R2。
 # 需要已登入的 wrangler，以及已建立的 bucket。
-# 綁定名稱必須是 WM_POP（Worker → Settings → Bindings → R2）。
-# 下次用 deploy 腳本重新部署前，請在 keep_bindings 加上 r2_bucket，否則綁定會被拿掉。
+# 綁定名稱是 WM_POP，bucket 是 world-map-pop。
+# deploy-cloudflare.mjs 會把這個 R2 綁定寫進部署檔，重新部署不會拿掉它。
 set -eu
 BUCKET="${1:-world-map-pop}"
 ROOT="$(CDPATH= cd -- "$(dirname "$0")/.." && pwd)/public/data/pop"
