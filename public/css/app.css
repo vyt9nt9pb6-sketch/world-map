@@ -250,8 +250,10 @@ details.passed p { margin: 2px 0 0; line-height: 1.6; }
 .btn-row.wrap > * { flex: 1; min-width: 96px; }
 
 /* ---- 對話面板（圖層／分享） ---- */
-.modal { position: fixed; inset: 0; z-index: 60; background: rgba(0, 0, 0, 0.32); display: flex; align-items: flex-end; justify-content: center; }
-.modal-sheet { width: 100%; max-width: 520px; border-radius: 26px 26px 0 0; padding: 14px 14px calc(18px + var(--safe-b)); animation: up 0.28s cubic-bezier(0.2, 0.8, 0.2, 1); max-height: 88dvh; overflow-y: auto; background-color: var(--glass); display: flex; flex-direction: column; gap: 12px; }
+.modal { position: fixed; inset: 0; z-index: 60; background: rgba(0, 0, 0, 0.32); display: flex; align-items: flex-end; justify-content: center; overflow: hidden; overscroll-behavior: none; touch-action: none; }
+.modal-sheet { width: 100%; max-width: min(520px, 100%); min-height: 0; min-width: 0; box-sizing: border-box; border-radius: 26px 26px 0 0; padding: 14px 14px calc(12px + env(safe-area-inset-bottom, 0px)); animation: up 0.28s cubic-bezier(0.2, 0.8, 0.2, 1); max-height: calc(100dvh - env(safe-area-inset-top, 0px) - env(safe-area-inset-bottom, 0px) - 8px); overflow-x: hidden; overflow-y: auto; -webkit-overflow-scrolling: touch; overscroll-behavior: contain; touch-action: pan-y; background-color: var(--glass); display: flex; flex-direction: column; gap: 12px; }
+.modal-sheet > * { flex: none; min-width: 0; max-width: 100%; }
+body:has(.modal:not(.hidden)) { overflow: hidden; height: 100%; }
 @keyframes up { from { transform: translateY(40px); opacity: 0; } to { transform: none; opacity: 1; } }
 .layer-cards { display: grid; grid-template-columns: repeat(3, 1fr); gap: 10px; }
 .layer-card { display: flex; flex-direction: column; align-items: center; gap: 6px; font-size: 14px; font-weight: 600; }

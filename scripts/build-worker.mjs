@@ -29,6 +29,8 @@ export async function buildWorker() {
   for (const f of await walk(PUBLIC)) {
     const buf = await readFile(f);
     const key = '/' + relative(PUBLIC, f).split('\\').join('/');
+    // 100 m 圖磚太大，不塞進 Worker 腳本；有 R2 綁定 WM_POP 時由 Worker 讀，否則退回較粗的一級。
+    if (key.startsWith('/data/pop/n/') || key.startsWith('/data/pop/f/') || key.startsWith('/data/pop/m/')) continue;
     map[key] = {
       type: TYPES[extname(f)] ?? 'application/octet-stream',
       hash: createHash('sha256').update(buf).digest('hex').slice(0, 16),

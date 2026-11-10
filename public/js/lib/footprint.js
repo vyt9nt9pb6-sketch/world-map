@@ -66,6 +66,19 @@ export function toHeatData(points, project) {
   return { data, max: Math.max(2, Math.min(peak, 16)) };
 }
 
+/** 地面約 80 公尺的熱力半徑，像素限制在 8–16，避免城市尺度糊成一大團。 */
+export function footprintRadiusPx(zoom, lat = 35) {
+  const z = Number.isFinite(zoom) ? zoom : 12;
+  const mpp = (156543.03392 * Math.cos(((lat || 0) * Math.PI) / 180)) / 2 ** z;
+  const px = 80 / Math.max(mpp, 0.5);
+  return Math.round(Math.max(8, Math.min(16, px)));
+}
+
+export function footprintHeatOpacity(zoom) {
+  const top = zoom >= 15 ? 0.82 : zoom >= 13 ? 0.72 : 0.5;
+  return [0, top];
+}
+
 export function footprintGradient() {
   return {
     0.25: '#355CFF',

@@ -5,7 +5,7 @@ import { gcj02ToWgs84, wgs84ToGcj02 } from './coords.js';
 import { mercatorPx, pxToLngLat } from './tianditu.js';
 
 export const POP_LOG_SCALE = 14;
-export const POP_URL = '/data/pop/china2020.bin.gz';
+export const POP_URL = '/data/pop/b.bin.gz';
 export const POP_ATTRIBUTION =
   'Chen, Xu, Ge, Zhang & Zhou (2024). A 100-m gridded population dataset of China’s seventh census. figshare. CC BY 4.0. https://doi.org/10.6084/m9.figshare.24916140';
 
@@ -237,22 +237,209 @@ export function renderTilePixels(x, y, z, grid, { size = 256 } = {}) {
   return out;
 }
 
-/** 高德 Flexible 圖層。opacity 0–1。 */
-export function createPopulationLayer(AMap, grid, { opacity = 0.72, zIndex = 4 } = {}) {
+/** 依縮放選最細的一級。levels 需已依 minZoom 由粗到細。 */
+export function levelForZoom(levels, zoom) {
+  let best = levels[0] || null;
+  for (const lv of levels || []) if (zoom + 1e-6 >= lv.minZoom) best = lv;
+  return best;
+}
+
+/** 高德視野（GCJ）四角轉成 WGS 外框，用來決定要抓哪些圖磚。 */
+export function boundsToWgs(bounds) {
+  const pts = [
+    [bounds.west, bounds.south],
+    [bounds.east, bounds.south],
+    [bounds.west, bounds.north],
+    [bounds.east, bounds.north],
+  ].map(([lng, lat]) => gcj02ToWgs84(lng, lat));
+  const lngs = pts.map((p) => p[0]);
+  const lats = pts.map((p) => p[1]);
+  return { west: Math.min(...lngs), east: Math.max(...lngs), south: Math.min(...lats), north: Math.max(...lats) };
+}
+
+export function tileCoord(level, lng, lat, origin) {
+  const ix = Math.floor((lng - origin.west) / level.tileDeg);
+  const iy = Math.floor((lat - origin.south) / level.tileDeg);
+  return [ix, iy];
+}
+
+/** 畫面蓋到的圖磚。tileSet 有列的話，不存在的格子不請求。 */
+export function tilesCovering(level, wgsBounds, origin) {
+  if (!level?.tileDeg) return [];
+  const ix0 = Math.floor((wgsBounds.west - origin.west) / level.tileDeg);
+  const ix1 = Math.floor((Math.max(wgsBounds.west, wgsBounds.east) - origin.west) / level.tileDeg);
+  const iy0 = Math.floor((wgsBounds.south - origin.south) / level.tileDeg);
+  const iy1 = Math.floor((Math.max(wgsBounds.south, wgsBounds.north) - origin.south) / level.tileDeg);
+  const out = [];
+  for (let iy = iy0; iy <= iy1; iy++) {
+    for (let ix = ix0; ix <= ix1; ix++) {
+      const id = `${ix}_${iy}`;
+      if (level.tileSet && !level.tileSet.has(id)) continue;
+      out.push({ ix, iy, id, url: `/data/pop/${level.id}/${id}.bin.gz` });
+    }
+  }
+  return out;
+}
+
+/**
+ * 依縮放用對應格子邊長畫圖磚。sample(wgsLng, wgsLat) 回人/km²。
+ * 格子先轉 GCJ 再畫，所以只在中國境內平移。
+ */
+export function renderSampledPixels(x, y, z, sample, step, { size = 256 } = {}) {
+  const out = new Uint8ClampedArray(size * size * 4);
+  if (!(step > 0) || !(z >= 0)) return out;
+  const corners = [
+    pxToLngLat(x * 256, y * 256, z),
+    pxToLngLat((x + 1) * 256, y * 256, z),
+    pxToLngLat(x * 256, (y + 1) * 256, z),
+    pxToLngLat((x + 1) * 256, (y + 1) * 256, z),
+  ].map((p) => gcj02ToWgs84(p.lng, p.lat));
+  let minLng = Infinity;
+  let maxLng = -Infinity;
+  let minLat = Infinity;
+  let maxLat = -Infinity;
+  for (const [lng, lat] of corners) {
+    if (lng < minLng) minLng = lng;
+    if (lng > maxLng) maxLng = lng;
+    if (lat < minLat) minLat = lat;
+    if (lat > maxLat) maxLat = lat;
+  }
+  minLng -= step;
+  maxLng += step;
+  minLat -= step;
+  maxLat += step;
+  let stride = step;
+  let across = Math.max(1, Math.ceil((maxLng - minLng) / stride));
+  let down = Math.max(1, Math.ceil((maxLat - minLat) / stride));
+  while (across * down > 6000) {
+    stride *= 2;
+    across = Math.ceil((maxLng - minLng) / stride);
+    down = Math.ceil((maxLat - minLat) / stride);
+  }
+  const toPx = (lng, lat) => {
+    const p = mercatorPx(lng, lat, z);
+    return { tx: ((p.x - x * 256) / 256) * size, ty: ((p.y - y * 256) / 256) * size };
+  };
+  for (let lat = maxLat; lat > minLat; lat -= stride) {
+    for (let lng = minLng; lng < maxLng; lng += stride) {
+      const d = sample(lng + stride / 2, lat - stride / 2);
+      if (!(d >= 1)) continue;
+      const rgba = colorForDensity(d);
+      if (!rgba[3]) continue;
+      const [lng0, lat0] = wgs84ToGcj02(lng, lat - stride);
+      const [lng1, lat1] = wgs84ToGcj02(lng + stride, lat);
+      const a = toPx(lng0, lat0);
+      const b = toPx(lng1, lat1);
+      fillRect(out, size, a.tx - 0.6, a.ty - 0.6, b.tx + 0.6, b.ty + 0.6, rgba);
+    }
+  }
+  return out;
+}
+
+/** 已載入的網格裡，從最細一級往回找。該級還沒載入才退回較粗的。 */
+export function lookupDensity(index, grids, lng, lat) {
+  if (!index) return 0;
+  for (let i = index.levels.length - 1; i >= 0; i--) {
+    const lv = index.levels[i];
+    let grid = null;
+    if (!lv.tileDeg) grid = grids.get(`/data/pop/${lv.file}`);
+    else {
+      const [ix, iy] = tileCoord(lv, lng, lat, index);
+      const id = `${ix}_${iy}`;
+      if (lv.tileSet && !lv.tileSet.has(id)) continue;
+      grid = grids.get(`/data/pop/${lv.id}/${id}.bin.gz`);
+    }
+    if (!grid) continue;
+    return sampleDensity(grid, lng, lat);
+  }
+  return 0;
+}
+
+/** 多級圖磚儲存。細格子沒載入時退回較粗的一級，所以縮小看全國也不會空白。 */
+export function createPopulationStore({ fetchImpl = fetch, indexUrl = '/data/pop/index.json' } = {}) {
+  let index = null;
+  const grids = new Map();
+  const inflight = new Map();
+
+  async function ready() {
+    if (index) return index;
+    const res = await fetchImpl(indexUrl);
+    if (!res.ok) throw new Error('人口密度索引載入失敗');
+    index = await res.json();
+    for (const lv of index.levels || []) if (Array.isArray(lv.tiles)) lv.tileSet = new Set(lv.tiles);
+    return index;
+  }
+
+  function stepForZoom(zoom) {
+    const lv = index ? levelForZoom(index.levels, zoom) : null;
+    return lv?.step || 0.04;
+  }
+
+  async function loadGrid(url) {
+    if (grids.has(url)) return grids.get(url);
+    if (inflight.has(url)) return inflight.get(url);
+    const job = (async () => {
+      try {
+        const res = await fetchImpl(url);
+        if (!res.ok) {
+          grids.set(url, null);
+          return null;
+        }
+        const grid = decodePopulation(await gunzipBytes(new Uint8Array(await res.arrayBuffer())));
+        grids.set(url, grid);
+        return grid;
+      } catch {
+        grids.set(url, null);
+        return null;
+      } finally {
+        inflight.delete(url);
+      }
+    })();
+    inflight.set(url, job);
+    return job;
+  }
+
+  async function loadView(wgsBounds, zoom) {
+    const idx = await ready();
+    const jobs = [];
+    for (const lv of idx.levels) {
+      if (lv.tileDeg) {
+        if (lv.minZoom > zoom + 0.2) continue;
+        const tiles = tilesCovering(lv, wgsBounds, idx);
+        if (tiles.length > 12) continue;
+        for (const t of tiles) jobs.push(loadGrid(t.url));
+      } else if (lv.file) jobs.push(loadGrid(`/data/pop/${lv.file}`));
+    }
+    await Promise.all(jobs);
+    return levelForZoom(idx.levels, zoom);
+  }
+
+  function sample(lng, lat) {
+    return lookupDensity(index, grids, lng, lat);
+  }
+
+  return { ready, loadView, sample, stepForZoom, get index() { return index; } };
+}
+
+/** 高德 Flexible 圖層。source 可以是單張網格，或 createPopulationStore。opacity 0–1。 */
+export function createPopulationLayer(AMap, source, { opacity = 0.72, zIndex = 4 } = {}) {
+  const sample = typeof source?.sample === 'function' ? (lng, lat) => source.sample(lng, lat) : (lng, lat) => sampleOnMap(source, lng, lat);
+  const stepFor = (z) => (typeof source?.stepForZoom === 'function' ? source.stepForZoom(z) : source?.step || 0.02);
   const layer = new AMap.TileLayer.Flexible({
-    cacheSize: 96,
+    cacheSize: 64,
     zIndex,
     opacity,
     zooms: [4, 20],
-    dataZooms: [4, 13],
+    dataZooms: [4, 16],
     createTile(x, y, z, success, fail) {
       try {
         const size = 256;
-        const px = renderTilePixels(x, y, z, grid, { size });
+        const px = typeof source?.sample === 'function'
+          ? renderSampledPixels(x, y, z, sample, stepFor(z), { size })
+          : renderTilePixels(x, y, z, source, { size });
         const canvas = document.createElement('canvas');
         canvas.width = canvas.height = size;
-        const ctx = canvas.getContext('2d', { willReadFrequently: false });
-        ctx.putImageData(new ImageData(px, size, size), 0, 0);
+        canvas.getContext('2d').putImageData(new ImageData(px, size, size), 0, 0);
         success(canvas);
       } catch {
         fail();

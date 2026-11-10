@@ -2,6 +2,7 @@
 import { handleApiRequest } from '../core/handlers.js';
 import { createDefaultLimiter, clientIp } from '../core/ratelimit.js';
 import { VERSIONED_ASSETS, rewriteAssetUrls, versionFromEtag } from '../core/asset-rev.js';
+import { securityHeaders } from '../core/security.js';
 
 // 兩層限流：
 // 1. API_RATE_LIMIT（Cloudflare Rate Limiting 綁定，跨 isolate、同一機房內有效）——有綁才用。
@@ -27,6 +28,22 @@ export default {
       }
     }
     limiter ??= createDefaultLimiter(env);
+    if ((url.pathname.startsWith('/data/pop/n/') || url.pathname.startsWith('/data/pop/f/') || url.pathname.startsWith('/data/pop/m/')) && env.WM_POP && typeof env.WM_POP.get === 'function') {
+      try {
+        const obj = await env.WM_POP.get(url.pathname.replace(/^\//, ''));
+        if (obj) {
+          return new Response(obj.body ?? obj, {
+            headers: {
+              'content-type': 'application/gzip',
+              'cache-control': 'public, max-age=86400',
+              ...securityHeaders(url.pathname),
+            },
+          });
+        }
+      } catch {
+        /* 沒有這塊圖磚就交給靜態檔（可能 404，前端會退回較粗的一級） */
+      }
+    }
     const res = await handleApiRequest(request, env, { rateLimiter: limiter });
     if (res) {
       res.headers.set('x-rl', env.API_RATE_LIMIT?.limit ? 'edge+memory' : 'memory');

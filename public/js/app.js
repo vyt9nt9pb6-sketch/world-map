@@ -13,9 +13,9 @@ import { drivingCardHtml, routeLabelHtml, midPoint, quickPicks } from './lib/rou
 import { weatherCardHtml, arrivalWeatherHtml } from './lib/weather.js';
 import { loadFuelPrefs, saveFuelPrefs, energyCost, totalTripCost, fuelSummary, FUEL_DEFAULTS, EV_DEFAULTS } from './lib/fuel.js';
 import { createWorldCoverFlexible, WORLDCOVER_LEGEND, legendColor, WORLDCOVER_ATTRIBUTION } from './lib/landcover.js';
-import { loadPopulationGrid, createPopulationLayer, populationLegendHtml, populationNote, DENSITY_STOPS } from './lib/population.js';
+import { createPopulationStore, createPopulationLayer, populationLegendHtml, populationNote, boundsToWgs, DENSITY_STOPS } from './lib/population.js';
 import { createTrafficLayer, trafficLegendHtml, TRAFFIC_LEGEND } from './lib/traffic-layer.js';
-import { filterPoints, shouldRecord, toHeatData, footprintGradient, FOOT_PRIVACY, FOOT_BACKGROUND, FOOT_RANGES } from './lib/footprint.js';
+import { filterPoints, shouldRecord, toHeatData, footprintGradient, footprintRadiusPx, footprintHeatOpacity, FOOT_PRIVACY, FOOT_BACKGROUND, FOOT_RANGES } from './lib/footprint.js';
 import { createMetroLoader, collectStations } from './lib/metro-layer.js';
 import { createStore, findSamePlace } from './lib/favstore.js';
 import { transitSummary, transitDetail, esc } from './lib/transit-view.js';
@@ -322,6 +322,8 @@ async function initMap() {
       drawMetroStations();
       scheduleMetro();
     }
+    schedulePop();
+    tuneFootHeat();
     scheduleViewSettled();
   });
   view.on('dragstart', () => {
@@ -2011,7 +2013,8 @@ async function markMyLocation() {
 
 /* ---------------- 熱力圖：人口密度、即時路況、我的足跡 ---------------- */
 let popLayer = null;
-let popGrid = null;
+let popStore = null;
+let popTimer = null;
 let trafficLayer = null;
 let footHeat = null;
 let footWatch = null;
@@ -2066,14 +2069,17 @@ async function syncFootHeat() {
   }
   const Heat = await loadHeatPlugin(view.AMap);
   if (!footHeat) {
+    const z = view.getZoom();
+    const lat = view.getCenter().lat;
     footHeat = new Heat(view.map, {
-      radius: 28,
-      opacity: [0, 0.85],
+      radius: footprintRadiusPx(z, lat),
+      opacity: footprintHeatOpacity(z),
       gradient: footprintGradient(),
       zooms: [3, 20],
       zIndex: 90,
     });
   }
+  tuneFootHeat();
   const shown = filterPoints(footPoints, state.heat.footRange);
   const { data, max } = toHeatData(shown, wgs84ToGcj02);
   footHeat.setDataSet({ data, max });
@@ -2137,12 +2143,12 @@ async function applyHeat() {
   }
   try {
     if (state.heat.pop) {
-      if (!popGrid) popGrid = await loadPopulationGrid();
-      if (seq !== heatSeq) return;
-      $('pop-note').textContent = populationNote(popGrid);
-      if (!popLayer) popLayer = createPopulationLayer(view.AMap, popGrid, { opacity: state.heat.popOpacity / 100 });
+      popStore ??= createPopulationStore();
+      if (!popLayer) popLayer = createPopulationLayer(view.AMap, popStore, { opacity: state.heat.popOpacity / 100 });
       popLayer.setOpacity?.(state.heat.popOpacity / 100);
       addMapLayer(popLayer);
+      if (seq !== heatSeq) return;
+      await refreshPop(true);
     } else if (popLayer) {
       removeMapLayer(popLayer);
     }
@@ -2163,6 +2169,31 @@ async function applyHeat() {
     if (seq === heatSeq) toast(e.message || '熱力圖載入失敗');
   }
   if (seq === heatSeq) syncRecorder();
+}
+function tuneFootHeat() {
+  if (!footHeat || !view || !state.heat.foot) return;
+  const z = view.getZoom();
+  footHeat.setOptions?.({ radius: footprintRadiusPx(z, view.getCenter().lat), opacity: footprintHeatOpacity(z) });
+}
+function schedulePop() {
+  if (!state.heat.pop || !view) return;
+  clearTimeout(popTimer);
+  popTimer = setTimeout(() => refreshPop(false), 180);
+}
+async function refreshPop(immediate) {
+  if (!state.heat.pop || !view) return;
+  popStore ??= createPopulationStore();
+  try {
+    const level = await popStore.loadView(boundsToWgs(view.getBounds()), view.getZoom());
+    $('pop-note').textContent = populationNote(level);
+    if (popLayer?.reload) popLayer.reload();
+    else if (immediate && popLayer) {
+      removeMapLayer(popLayer);
+      addMapLayer(popLayer);
+    }
+  } catch (e) {
+    toast(e.message || '人口密度載入失敗');
+  }
 }
 function onHeatAuth() {
   if (!state.user) {

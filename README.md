@@ -17,17 +17,29 @@
 - 資料：<https://doi.org/10.6084/m9.figshare.24916140>
 - 請這樣引用：Chen, Yuehong; Xu, Congcong; Ge, Yong; Zhang, Xiaoxiang; Zhou, Ya'nan (2024). A 100-m gridded population dataset of China’s seventh census using ensemble learning and geospatial big data. figshare. Dataset. https://doi.org/10.6084/m9.figshare.24916140.v1
 
-原始檔是 Albers／Krasovsky、每格人數（100×100 m，NoData 32767）。整張拿去 `gdalwarp` 會一次吃掉數 GB，所以 `scripts/build-pop-grid.py` 逐列讀、把人數加總到 0.01° 的 WGS-84 網格（加總後全國約 **13.92 億人**，與七普大陸人口同一量級；港澳台不在這份網格裡）。再編成 `log2×14` 的 uint8，gzip 後要能放進 Worker。**0.01°（約 1 公里）整張約 22 MB，gzip 後仍太大**；目前提交的是再加總一倍的 **0.02°（約 2 公里）**，`public/data/pop/china2020.bin.gz` 約 **1.1 MB**。畫面上會寫「約 2 公里（由 100 公尺普查格子加總）」。這是 2020 年的靜態估計，**不是即時人流**。
+原始檔是 Albers／Krasovsky、每格人數（100×100 m，NoData 32767）。整張拿去 `gdalwarp` 會一次吃掉數 GB，所以 `scripts/build-pop-tiles.py` 逐列把人數加進 WGS-84 網格（全國約 **13.92 億人**，與七普大陸人口同一量級；港澳台不在這份網格裡），編成 `log2×14` 的 uint8。畫面依縮放換解析度，只載入目前視野裡的圖磚：
 
-座標：網格是 WGS-84。高德底圖在中國境內是 GCJ-02，每個人口格子先轉成 GCJ 再畫；`outOfChina` 為真時轉換是恆等。原始投影沒有 TOWGS84 參數，角座標直接當成 WGS-84，誤差大約幾十公尺，小於 2 公里的顯示格子。全國很小的縮放會把多格合併、取較高值，避免城市消失；城市尺度用的是格子本身的人/km²。
+| 縮放 | 檔案 | 格子 | 放在哪 |
+| --- | --- | --- | --- |
+| 小（全國） | `c.bin.gz` | 約 4 公里（0.04°） | Worker 靜態檔 |
+| 城市（沒上傳細圖磚時） | `b.bin.gz` | 約 2 公里（0.02°） | Worker 靜態檔 |
+| 城市放大 | `m/` | 約 1 公里（0.01°） | 選用 R2 `WM_POP` |
+| 再放大 | `f/` | 約 500 公尺（0.005°） | 選用 R2 `WM_POP` |
+| 最大 | `n/` | 約 100 公尺（0.001°） | 選用 R2 `WM_POP` |
+
+舊的單檔 `china2020.bin.gz`（0.02°）已拿掉。熱力半徑與透明度跟縮放一起變，放大時格子較清楚，不會一直是一大團。這是 2020 年的靜態估計，**不是即時人流**。
+
+座標：網格是 WGS-84。高德底圖在中國境內是 GCJ-02，每個人口格子先轉成 GCJ 再畫；`outOfChina` 為真時轉換是恆等。原始投影沒有 TOWGS84 參數，角座標直接當成 WGS-84，誤差大約幾十公尺，在 100 公尺這一級才看得到。某一級圖磚還沒載入、或 R2 沒有那一級時，會改畫已經載入的較粗一級，不會把空洞畫成海。
+
+圖層面板在手機上最高不超過可視高度（`100dvh` 扣掉瀏海與底部安全區），內容在面板裡捲動（`overflow-y: auto`、`-webkit-overflow-scrolling: touch`），背後的地圖不會跟著捲。橫向約 390 像素寬時也一樣。
 
 圖例單位是 **人/km²**（1、10、50、200、500、1千、5千、2萬+），有透明度滑桿，面板與地圖上都有「2020 靜態估計」與來源。
 
-重製資料（不需把 126 MB 的 rar 放進 git）：
+重製資料（不需把 126 MB 的 rar 放進 git；`f/` 與 `n/` 已在 `.gitignore`）：
 
 ```bash
 # 官方 unrar 解出 PopSE_China2020_100m.tif 之後
-python3 scripts/build-pop-grid.py /path/to/PopSE_China2020_100m.tif
+python3 scripts/build-pop-tiles.py /path/to/PopSE_China2020_100m.tif
 ```
 
 ### B. 即時路況（公開）
@@ -39,14 +51,22 @@ python3 scripts/build-pop-grid.py /path/to/PopSE_China2020_100m.tif
 登入後才看得到、才記得到。位置存在既有的 `WM_KV`，鍵是 `fp:{uid}`（uid 是 session 裡的 HMAC，請求不能指定別人）。`GET/POST/DELETE /api/footprint` 都要有效 session；寫入與刪除還要同源。回應 `cache-control: no-store`，不含 email、不含 uid。沒有「列出所有人」的路由，帶 `?uid=` 也不會換成別人。
 
 - **記錄足跡**預設關閉。打開之後，只用頁面在前景時的 `watchPosition`（移動約 40 公尺或停留滿 30 秒記一筆）。**網頁關掉、或分頁在背景，瀏覽器就不會繼續定位**——這不是 App，做不到背景追蹤。
-- 時間範圍：今天／7 天／30 天／全部。熱力用 `AMap.HeatMap`，座標先轉 GCJ-02（境外不轉）；顏色越熱代表在那附近被記到越多次。
+- 時間範圍：今天／7 天／30 天／全部。熱力用 `AMap.HeatMap`，座標先轉 GCJ-02（境外不轉）；顏色越熱代表在那附近被記到越多次。半徑跟著縮放，大約對應地面 80 公尺（像素半徑限制在 8–16），縮小看時透明度也降低，不會蓋住整條街。
 - **清除我的足跡**會刪掉這個帳號在 KV 裡的全部點，不能還原。
 - 未登入時開關只顯示「請登入」，不會向伺服器要資料，也不會開定位。
 - 每人最多 3000 點、一次最多 40 點、每小時最多 180 次寫入。幾乎同一點的 GPS 抖動（15 秒內、20 公尺內）不會另存。
 
 ### 部署與 Kwok 要設定的東西
 
-**沒有新的 Secret，也不需要 R2。** 人口網格是靜態檔，跟網站一起部署。足跡用原本的 `WM_KV`。路況與足跡熱力用原本的 `AMAP_JS_KEY`／`AMAP_JS_SECURITY_CODE`。
+足跡用原本的 `WM_KV`。路況與足跡熱力用原本的 `AMAP_JS_KEY`／`AMAP_JS_SECURITY_CODE`。人口密度：縮小看是約 4 公里（`c.bin.gz`），沒有細圖磚時城市仍是約 2 公里（`b.bin.gz`，跟現在線上一樣，跟網站一起部署）。放大到約 1 公里（`m/`）、500 公尺（`f/`）、100 公尺（`n/`）時，手機只抓畫面裡的幾塊。這三級 gzip 後大約 3 MB、9 MB、74 MB，塞進 Worker 腳本會超過上傳上限，所以沒有打包；沒上傳時會自動退回已載入的較粗一級，不會壞掉。要細過 2 公里：
+
+```bash
+npx wrangler r2 bucket create world-map-pop
+# Worker → Settings → Bindings → R2 bucket，變數名稱填 WM_POP
+sh scripts/upload-pop-native.sh world-map-pop
+```
+
+上傳的物件鍵是 `data/pop/m/….bin.gz`、`data/pop/f/….bin.gz`、`data/pop/n/….bin.gz`（內容是 gzip，`content-type` 用 `application/gzip`）。下次若用本倉庫的 deploy 腳本重新部署，`keep_bindings` 只有 `secret_text` 和 `plain_text`，**會拿掉你後來加的 R2 綁定**。加好 `WM_POP` 之後，請在 `scripts/deploy-cloudflare.mjs` 的 `keep_bindings` 補上 `'r2_bucket'` 再產生部署檔，否則細圖磚會在下一次部署消失。這次產生的部署檔**沒有**加上 R2，避免 bucket 還不存在時部署失敗。
 
 重新部署時仍要帶著 KV，否則登入與足跡會一起被拿掉：
 
@@ -318,7 +338,7 @@ public/                 前端（純靜態檔，無需編譯）
   js/lib/population.js  2020 人口密度（Chen et al.，只在中國境內做 GCJ 偏移）
   js/lib/traffic-layer.js 高德即時路況
   js/lib/footprint.js   我的足跡（時間範圍、熱力資料）
-  data/pop/             china2020.bin.gz（約 2 公里網格，CC BY 4.0）
+  data/pop/             c.bin.gz、b.bin.gz（約 4／2 公里，CC BY 4.0）；m/、f/、n/ 不進 git
 core/                   後端邏輯（平台無關：標準 Fetch Request → Response）
   handlers.js           /api/search、/api/geocode、/api/route、/api/weather、/api/footprint 等
   footprint.js          登入者自己的足跡（KV，不公開）

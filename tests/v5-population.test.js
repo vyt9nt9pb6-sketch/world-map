@@ -132,13 +132,13 @@ test('路況圖層：自動更新、圖例含暢通／緩行／擁堵', () => {
 });
 
 test('已建好的普查網格（若存在）：覆蓋中國、上海密、高原疏、總人口合理', () => {
-  const file = new URL('../public/data/pop/china2020.bin.gz', import.meta.url);
+  const file = new URL('../public/data/pop/c.bin.gz', import.meta.url);
   if (!existsSync(file)) return;
   const grid = decodePopulation(gunzipSync(readFileSync(file)));
   assert.equal(grid.year, 2020);
   assert.equal(grid.license, 'CC BY 4.0');
   assert.ok(grid.west < 75 && grid.east > 130 && grid.south < 20 && grid.north > 50);
-  assert.ok(grid.step <= 0.03 && grid.step >= 0.004);
+  assert.ok(grid.step <= 0.04 && grid.step >= 0.001);
   assert.ok(grid.peopleTotal > 1.15e9 && grid.peopleTotal < 1.7e9);
   const shanghai = sampleDensity(grid, 121.4737, 31.2304);
   const tibet = sampleDensity(grid, 86.5, 32.5);

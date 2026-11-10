@@ -140,7 +140,11 @@ body.sat { --blue: #66b2ff; --glass: rgba(28, 30, 38, 0.5); --glass-strong: rgba
 /* ───────── 圖層面板：2×2 井字 ───────── */
 .modal { background: rgba(10, 12, 20, 0.28); animation: fade 0.25s ease; }
 .modal-sheet { border-radius: 34px 34px 0 0; animation: sheet-in 0.55s var(--spring); gap: 10px; }
-@media (min-width: 560px) { .modal-sheet { border-radius: 34px; margin-bottom: 24px; } }
+.modal-sheet .head-row { position: sticky; top: -14px; z-index: 4; margin: -14px -14px 0; padding: 10px 14px 8px; background: var(--glass-strong); }
+@media (min-width: 560px) { .modal-sheet { border-radius: 34px; margin-bottom: max(8px, env(safe-area-inset-bottom, 0px)); max-height: calc(100dvh - env(safe-area-inset-top, 0px) - env(safe-area-inset-bottom, 0px) - 32px); } }
+@media (orientation: landscape) and (max-height: 500px) {
+  .modal-sheet { max-height: calc(100dvh - env(safe-area-inset-top, 0px) - env(safe-area-inset-bottom, 0px) - 4px); border-radius: 20px 20px 0 0; }
+}
 @keyframes sheet-in { from { transform: translateY(48px) scale(0.98); opacity: 0; } to { transform: none; opacity: 1; } }
 @keyframes fade { from { opacity: 0; } to { opacity: 1; } }
 /* 緊湊：2×2，每格是「小縮圖＋文字」橫排，整組只佔約 130px 高，讓下面的選項不被擠出畫面 */
