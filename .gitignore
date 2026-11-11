@@ -1,0 +1,22 @@
+# 機密：絕不提交
+.env
+.env.*
+!.env.example
+.dev.vars
+*.pem
+*.key
+
+node_modules/
+.vercel/
+.wrangler/
+*.log
+tunnel.log
+server.log
+.run/
+.DS_Store
+dist/
+__pycache__/
+# 1 km／500 m／100 m 人口圖磚太大，不進 git／Worker 腳本。上傳方式見 README v5。
+public/data/pop/n/
+public/data/pop/f/
+public/data/pop/m/

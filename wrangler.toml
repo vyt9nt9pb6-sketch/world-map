@@ -1,0 +1,18 @@
+# Cloudflare Workers 設定（尚未部署；部署步驟見 README）
+name = "world-map"
+main = "worker/index.js"
+compatibility_date = "2026-10-01"
+
+[assets]
+directory = "./public"
+binding = "ASSETS"
+run_worker_first = ["/api/*", "/_AMapService/*"]
+
+# 收藏同步／信箱登入用的 KV（先 `npx wrangler kv namespace create WM_KV`，再把 id 填進來）
+# [[kv_namespaces]]
+# binding = "WM_KV"
+# id = "<kv-namespace-id>"
+
+# 金鑰不要寫在這裡！請用 `npx wrangler secret put <名稱>`：
+#   AMAP_KEY（必要）、TIANDITU_TK（天地圖，選填）、AMAP_JS_KEY + AMAP_JS_SECURITY_CODE（3D，選填）、
+#   MAIL_PROVIDER / MAIL_FROM / BREVO_API_KEY 或 RESEND_API_KEY（信箱登入，選填；也可改用 [[send_email]] binding EMAIL）

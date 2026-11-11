@@ -1,0 +1,387 @@
+<!doctype html>
+<html lang="zh-Hant">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, maximum-scale=1, user-scalable=no" />
+    <meta name="theme-color" content="#f2f2f7" media="(prefers-color-scheme: light)" />
+    <meta name="theme-color" content="#1c1c1e" media="(prefers-color-scheme: dark)" />
+    <meta name="color-scheme" content="light dark" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="default" />
+    <meta name="apple-mobile-web-app-title" content="World Map" />
+    <title>World Map</title>
+    <link rel="manifest" href="/manifest.webmanifest" />
+    <link rel="icon" href="/icons/icon.svg" type="image/svg+xml" />
+    <link rel="apple-touch-icon" href="/icons/icon-180.png" />
+    <link rel="stylesheet" href="/css/app.css" />
+    <link rel="stylesheet" href="/css/glass.css" />
+  </head>
+  <body>
+    <!-- 圖示（同一張 sprite） -->
+    <svg width="0" height="0" style="position:absolute" aria-hidden="true">
+      <symbol id="i-layers" viewBox="0 0 24 24"><path fill="currentColor" d="M12 3 2 8l10 5 10-5-10-5Zm-8.2 9L2 13l10 5 10-5-1.8-1L12 16l-8.2-4Zm0 4L2 17l10 5 10-5-1.8-1L12 20l-8.2-4Z"/></symbol>
+      <symbol id="i-locate" viewBox="0 0 24 24"><path fill="currentColor" d="M3.4 10.6 20 3.8c.8-.3 1.5.4 1.2 1.2l-6.8 16.6c-.4.9-1.7.8-1.9-.1l-1.6-6.6a1 1 0 0 0-.7-.7l-6.6-1.6c-.9-.2-1-1.5-.1-1.9Z"/></symbol>
+      <symbol id="i-search" viewBox="0 0 24 24"><path fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" d="M10.5 18a7.5 7.5 0 1 1 0-15 7.5 7.5 0 0 1 0 15Zm5.5-1.8 4.6 4.6"/></symbol>
+      <symbol id="i-route" viewBox="0 0 24 24"><path fill="currentColor" d="M21.71 11.29 12.71 2.29a1 1 0 0 0-1.42 0l-9 9a1 1 0 0 0 0 1.42l9 9a1 1 0 0 0 1.42 0l9-9a1 1 0 0 0 0-1.42ZM14 14.5V12h-4v3H8v-4a1 1 0 0 1 1-1h5V7.5l3.5 3.5-3.5 3.5Z"/></symbol>
+      <symbol id="i-share" viewBox="0 0 24 24"><path fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="M12 15V3m-4 4 4-4 4 4M6 10H5a1 1 0 0 0-1 1v9a1 1 0 0 0 1 1h14a1 1 0 0 0 1-1v-9a1 1 0 0 0-1-1h-1"/></symbol>
+      <symbol id="i-star" viewBox="0 0 24 24"><path fill="none" stroke="currentColor" stroke-width="1.9" stroke-linejoin="round" d="m12 3 2.7 5.6 6.1.9-4.4 4.3 1 6.1L12 17l-5.4 2.9 1-6.1-4.4-4.3 6.1-.9L12 3Z"/></symbol>
+      <symbol id="i-star-fill" viewBox="0 0 24 24"><path fill="currentColor" stroke="currentColor" stroke-width="1.9" stroke-linejoin="round" d="m12 3 2.7 5.6 6.1.9-4.4 4.3 1 6.1L12 17l-5.4 2.9 1-6.1-4.4-4.3 6.1-.9L12 3Z"/></symbol>
+      <symbol id="i-clock" viewBox="0 0 24 24"><path fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" d="M12 21a9 9 0 1 1 0-18 9 9 0 0 1 0 18Zm0-13.5V12l3 2"/></symbol>
+      <symbol id="i-close" viewBox="0 0 24 24"><path fill="none" stroke="currentColor" stroke-width="2.4" stroke-linecap="round" d="m6 6 12 12M18 6 6 18"/></symbol>
+      <symbol id="i-back" viewBox="0 0 24 24"><path fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round" d="m15 5-7 7 7 7"/></symbol>
+      <symbol id="i-person" viewBox="0 0 24 24"><circle cx="12" cy="8.6" r="4.1" fill="currentColor"/><path fill="currentColor" d="M3.6 22c0-4.6 3.8-7.4 8.4-7.4s8.4 2.8 8.4 7.4z"/></symbol>
+      <symbol id="i-pin" viewBox="0 0 24 24"><path fill="currentColor" d="M12 2a7 7 0 0 0-7 7c0 5.2 7 13 7 13s7-7.8 7-13a7 7 0 0 0-7-7Zm0 9.5A2.5 2.5 0 1 1 12 6.5a2.5 2.5 0 0 1 0 5Z"/></symbol>
+      <symbol id="i-trash" viewBox="0 0 24 24"><path fill="none" stroke="currentColor" stroke-width="1.9" stroke-linecap="round" stroke-linejoin="round" d="M4 7h16M9 7V4h6v3m-8 0 1 13h8l1-13"/></symbol>
+      <symbol id="i-phone" viewBox="0 0 24 24"><path fill="currentColor" d="M6.6 10.8a15.1 15.1 0 0 0 6.6 6.6l2.2-2.2c.3-.3.7-.4 1-.2 1.1.4 2.3.6 3.6.6.6 0 1 .4 1 1V20c0 .6-.4 1-1 1A17 17 0 0 1 3 4c0-.6.4-1 1-1h3.5c.6 0 1 .4 1 1 0 1.300.2 2.500.6 3.600.1.300 0 .700-.2 1l-2.300 2.200Z"/></symbol>
+      <symbol id="i-swap" viewBox="0 0 24 24"><path fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" d="M8 4v14m0 0-3-3m3 3 3-3M16 20V6m0 0-3 3m3-3 3 3"/></symbol>
+    </svg>
+
+    <div id="map" aria-label="地圖"></div>
+    <div id="map-error" class="map-error hidden" role="alert">
+      <div class="map-error-card">
+        <h2>地圖暫時無法顯示</h2>
+        <p id="map-error-text">需要設定高德地圖的瀏覽器金鑰。</p>
+        <button type="button" id="map-retry" class="btn-fill">重試</button>
+      </div>
+    </div>
+
+    <!-- 右上：圓形浮動按鈕（Apple 地圖的排列） -->
+    <div class="ctl-stack" id="ctl-stack">
+      <div class="ctl-group material">
+        <button id="btn-layer" type="button" aria-label="圖層" title="圖層"><svg><use href="#i-layers" /></svg></button>
+        <button id="btn-3d" type="button" aria-label="切換 3D" aria-pressed="false" title="2D／3D"><span id="btn-3d-label">3D</span></button>
+        <button id="btn-locate" type="button" aria-label="我的位置" title="我的位置"><svg><use href="#i-locate" /></svg></button>
+      </div>
+      <button id="btn-compass" class="ctl-round material compass hidden" type="button" aria-label="指北針：點一下回正北" title="回正北">
+        <svg viewBox="0 0 24 24" id="compass-needle"><path d="M12 3.2 15.2 12H8.8L12 3.2Z" fill="#ff3b30"/><path d="M12 20.8 8.8 12h6.4L12 20.8Z" fill="currentColor" opacity=".5"/></svg>
+      </button>
+    </div>
+
+    <!-- 比例尺（左下，面板之上） -->
+    <button type="button" id="area-btn" class="area-btn hidden"><svg class="ic"><use href="#i-search" /></svg><span>搜尋此區域</span></button>
+    <div class="map-attrib" id="map-attrib" aria-hidden="true"></div>
+    <div id="heat-hud" class="heat-hud hidden" aria-live="polite">
+      <div id="heat-hud-pop" class="hidden"><span id="heat-hud-pop-bar" class="heat-bar"></span><span>人/km² · 2020 靜態估計</span></div>
+      <div id="heat-hud-traffic" class="hidden"></div>
+    </div>
+    <div class="scale" id="scale" aria-hidden="true"><div class="scale-bar" id="scale-bar"></div><span id="scale-label"></span></div>
+
+    <!-- 底部面板 -->
+    <section id="sheet" class="sheet material" data-snap="peek" aria-label="搜尋與資訊">
+      <div class="sheet-grab" id="sheet-grab" aria-hidden="true"><span></span></div>
+
+      <!-- 搜尋（首頁） -->
+      <div id="view-search" class="view">
+        <div class="drag-zone peek-block">
+          <div id="pick-hint" class="pick-hint hidden">
+            <span id="pick-hint-text">選擇終點</span>
+            <button type="button" id="pick-cancel" class="link-btn">取消</button>
+          </div>
+          <form id="search-form" class="search-row" role="search" autocomplete="off">
+            <label class="search-field">
+              <svg class="ic"><use href="#i-search" /></svg>
+              <input id="search-input" type="search" enterkeyhint="search" placeholder="搜尋地點、地址" aria-label="搜尋地點或地址" maxlength="80" />
+              <button type="button" id="search-clear" class="clear hidden" aria-label="清除"><svg><use href="#i-close" /></svg></button>
+            </label>
+            <button type="button" id="search-cancel" class="link-btn hidden">取消</button>
+            <button type="button" id="btn-avatar" class="avatar-btn" aria-label="我的（帳號與收藏）" title="我的">
+              <svg><use href="#i-person" /></svg>
+            </button>
+          </form>
+        </div>
+
+        <div id="search-home" class="scroll">
+          <button type="button" id="area-suggest" class="suggest-row hidden">
+            <span class="ico blue"><svg><use href="#i-search" /></svg></span>
+            <span class="body"><span class="name" id="area-suggest-name"></span><span class="sub">依目前地圖範圍搜尋，拖曳或縮放地圖時自動更新</span></span>
+          </button>
+          <section class="block" aria-labelledby="h-nearby">
+            <h3 id="h-nearby">搜尋附近</h3>
+            <div class="nearby-grid" id="nearby-grid">
+              <button type="button" class="nearby-btn" data-kind="toilet"><i style="--c:#0a84ff">🚻</i><span>廁所</span></button>
+              <button type="button" class="nearby-btn" data-kind="gas"><i style="--c:#ff9f0a">⛽</i><span>加油站</span></button>
+              <button type="button" class="nearby-btn" data-kind="ev"><i style="--c:#30d158">🔌</i><span>充電站</span></button>
+            </div>
+          </section>
+          <section class="block hidden" id="history-block" aria-labelledby="h-history">
+            <div class="block-head"><h3 id="h-history">最近搜尋</h3><button type="button" id="history-clear" class="link-btn">清除</button></div>
+            <ul id="history-list" class="list card"></ul>
+          </section>
+          <section class="block" aria-labelledby="h-here">
+            <h3 id="h-here">目前位置</h3>
+            <div class="env-slot" data-env-slot></div>
+          </section>
+        </div>
+        <div id="search-results" class="scroll hidden">
+          <div class="results-tools">
+            <button type="button" id="btn-area-mode" class="chip" aria-pressed="false"><svg class="ic"><use href="#i-search" /></svg><span>搜尋附近・跟著地圖更新</span></button>
+          </div>
+          <div id="search-status" class="status" role="status" aria-live="polite"></div>
+          <ul id="results" class="list card"></ul>
+        </div>
+        <p class="credits">地圖 © 高德地圖；地鐵／輕軌線路 © <a href="https://www.openstreetmap.org/copyright" target="_blank" rel="noopener">OpenStreetMap contributors</a>（ODbL）；氣象資料 <a href="https://open-meteo.com/" target="_blank" rel="noopener">Open-Meteo</a>（CC BY 4.0）；人口密度 Chen et al. 2024 第七次人口普查 100 m 網格（<a href="https://creativecommons.org/licenses/by/4.0/" target="_blank" rel="noopener">CC BY 4.0</a>，2020 靜態估計）</p>
+      </div>
+
+      <!-- 地點卡（Apple 地圖風格） -->
+      <div id="view-place" class="view hidden">
+        <div class="drag-zone peek-block place-head">
+          <div class="place-title">
+            <h2 id="place-name"></h2>
+            <p id="place-sub" class="place-sub hidden"></p>
+            <p id="place-addr" class="muted"></p>
+          </div>
+          <button type="button" id="place-close" class="round-x" aria-label="關閉"><svg><use href="#i-close" /></svg></button>
+        </div>
+        <div class="scroll">
+          <div id="place-photos" class="photo-strip hidden" aria-label="照片"></div>
+          <div id="place-badges" class="badges hidden"></div>
+          <div id="place-weather" class="wx-slot hidden" aria-live="polite"></div>
+          <div class="action-row four">
+            <button type="button" id="place-route" class="act primary"><svg><use href="#i-route" /></svg><span>路線</span></button>
+            <button type="button" id="place-call" class="act hidden"><svg><use href="#i-phone" /></svg><span>電話</span></button>
+            <button type="button" id="place-fav" class="act" aria-pressed="false"><svg><use href="#i-star" /></svg><span>收藏</span></button>
+            <button type="button" id="place-share" class="act"><svg><use href="#i-share" /></svg><span>分享</span></button>
+          </div>
+          <div class="card info" id="place-info"></div>
+          <div class="env-slot" data-env-slot id="place-env"></div>
+        </div>
+      </div>
+
+      <!-- 路線（只能從地點卡的「路線」進入） -->
+      <div id="view-route" class="view hidden">
+        <div class="drag-zone peek-block head-row">
+          <button type="button" id="route-back" class="round-x" aria-label="返回"><svg><use href="#i-back" /></svg></button>
+          <h2 id="route-title">路線</h2>
+          <button type="button" id="route-close" class="round-x" aria-label="關閉路線"><svg><use href="#i-close" /></svg></button>
+        </div>
+        <div class="scroll">
+          <div class="mode-tabs" id="mode-tabs" role="tablist" aria-label="交通方式">
+            <button type="button" role="tab" data-mode="driving">🚗<span>駕車</span></button>
+            <button type="button" role="tab" data-mode="transit">🚌<span>公交火車</span></button>
+            <button type="button" role="tab" data-mode="walking">🚶<span>步行</span></button>
+            <button type="button" role="tab" data-mode="bicycling">🚴<span>騎行</span></button>
+            <button type="button" role="tab" data-mode="electrobike">🛵<span>電動車</span></button>
+          </div>
+          <div class="stops card" id="stops"></div>
+          <div class="stop-actions">
+            <button type="button" id="btn-add-via" class="link-btn">＋ 途經點</button>
+            <button type="button" id="btn-swap" class="link-btn"><svg class="ic"><use href="#i-swap" /></svg> 起終點互換</button>
+          </div>
+          <details class="card route-opts hidden" id="route-opts">
+            <summary><span>路線選項</span><em id="route-opts-sum">現在出發</em></summary>
+            <div class="seg-ctl depart" id="depart-seg" role="radiogroup" aria-label="出發時間">
+              <button type="button" role="radio" data-d="now" aria-checked="true">現在出發</button>
+              <button type="button" role="radio" data-d="at" aria-checked="false">設定出發時間</button>
+            </div>
+            <input type="datetime-local" id="depart-input" class="hidden" aria-label="出發時間" />
+            <label class="switch-row" id="row-avoid-hw"><span>避開高速公路</span><input type="checkbox" role="switch" id="opt-avoid-hw" /><i class="tgl" aria-hidden="true"></i></label>
+            <label class="switch-row" id="row-avoid-toll"><span>避開收費站</span><input type="checkbox" role="switch" id="opt-avoid-toll" /><i class="tgl" aria-hidden="true"></i></label>
+            <div id="row-fuel" class="fuel-opts">
+              <div class="opt-title">能耗估算</div>
+              <div class="seg-ctl" id="fuel-type" role="radiogroup" aria-label="車輛類型">
+                <button type="button" role="radio" data-t="gas" aria-checked="true">油車</button>
+                <button type="button" role="radio" data-t="ev" aria-checked="false">電車</button>
+              </div>
+              <div class="fuel-inputs">
+                <label><span id="fuel-cons-lbl">油耗</span><input type="number" id="fuel-cons" inputmode="decimal" min="0.5" max="99" step="0.1" aria-label="百公里能耗" /><em id="fuel-cons-unit">L/100km</em></label>
+                <label><span id="fuel-price-lbl">油價</span><input type="number" id="fuel-price" inputmode="decimal" min="0.01" max="99" step="0.01" aria-label="能源單價" /><em id="fuel-price-unit">¥/L</em></label>
+              </div>
+              <p class="muted small" id="fuel-note">預設值僅供參考（油價因地而異），改成你車子的實際數字更準。油費＝距離×油耗×油價，為估算值。</p>
+            </div>
+          </details>
+          <div class="chips" id="strategy-chips" role="radiogroup" aria-label="路線偏好"></div>
+          <div class="chips hidden" id="route-quick" role="group" aria-label="快速選擇路線"></div>
+          <div id="route-status" class="status" role="status" aria-live="polite"></div>
+          <p id="route-depart-note" class="muted small hidden"></p>
+          <div id="route-arrive" class="wx-arrive-slot hidden" aria-live="polite"></div>
+          <ul id="route-options" class="route-options"></ul>
+          <div id="nav-buttons" class="action-row hidden">
+            <button type="button" class="act primary wide" id="nav-amap"><span>高德地圖導航</span></button>
+            <button type="button" class="act wide" id="nav-apple"><span>Apple 地圖</span></button>
+          </div>
+          <p id="nav-note" class="muted small hidden"></p>
+        </div>
+      </div>
+
+      <!-- 搜尋附近的結果 -->
+      <div id="view-nearby" class="view hidden">
+        <div class="drag-zone peek-block head-row">
+          <button type="button" id="nearby-back" class="round-x" aria-label="返回"><svg><use href="#i-back" /></svg></button>
+          <h2 id="nearby-title">附近</h2>
+          <button type="button" id="nearby-close" class="round-x" aria-label="關閉"><svg><use href="#i-close" /></svg></button>
+        </div>
+        <div class="scroll">
+          <div class="chips" id="nearby-kinds"></div>
+          <div class="stop-actions"><button type="button" id="nearby-here" class="link-btn">在地圖中心重新搜尋</button></div>
+          <div id="nearby-status" class="status" role="status" aria-live="polite"></div>
+          <ul id="nearby-list" class="list card"></ul>
+        </div>
+      </div>
+
+      <!-- 我的：帳號與收藏 -->
+      <div id="view-account" class="view hidden">
+        <div class="drag-zone peek-block head-row">
+          <span class="spacer"></span>
+          <h2>我的</h2>
+          <button type="button" id="account-close" class="round-x" aria-label="關閉"><svg><use href="#i-close" /></svg></button>
+        </div>
+        <div class="scroll">
+          <div class="profile">
+            <div class="avatar-lg"><svg><use href="#i-person" /></svg></div>
+            <h3 id="profile-name">訪客</h3>
+            <p id="account-status" class="muted small">收藏只存在這台裝置</p>
+          </div>
+          <p id="account-disabled" class="muted small hidden card pad">信箱登入尚未啟用（網站管理者還沒有設定寄信服務）。收藏目前只存在這台裝置，可用「匯出」備份。</p>
+          <form id="login-form" class="card pad login-form" autocomplete="on">
+            <p class="muted small">輸入信箱，我們會寄一組 6 位數驗證碼（10 分鐘內有效）。登入後收藏會在你的各裝置之間同步。</p>
+            <input id="login-email" type="email" inputmode="email" autocomplete="email" placeholder="你的信箱" maxlength="254" required aria-label="信箱" />
+            <button type="submit" class="btn-fill" id="login-send">寄送驗證碼</button>
+          </form>
+          <form id="code-form" class="card pad login-form hidden" autocomplete="one-time-code">
+            <p class="muted small" id="code-hint"></p>
+            <input id="login-code" type="text" inputmode="numeric" autocomplete="one-time-code" pattern="\d{6}" maxlength="6" placeholder="6 位數驗證碼" required aria-label="驗證碼" />
+            <button type="submit" class="btn-fill" id="code-verify">登入</button>
+            <button type="button" class="link-btn" id="code-back">換一個信箱／重新寄送</button>
+          </form>
+          <div id="account-in" class="card pad hidden">
+            <div class="btn-row">
+              <button type="button" class="btn-tint" id="btn-sync">立即同步</button>
+              <button type="button" class="btn-tint danger" id="btn-logout">登出</button>
+            </div>
+          </div>
+          <div id="account-status2" class="status" role="status" aria-live="polite"></div>
+
+          <div class="block-head"><h3>收藏</h3><span id="favs-count" class="muted small"></span></div>
+          <div id="favs-status" class="status" role="status" aria-live="polite"></div>
+          <ul id="fav-list" class="list card"></ul>
+          <div class="btn-row pad-top">
+            <button type="button" class="btn-tint" id="fav-export">匯出 JSON</button>
+            <button type="button" class="btn-tint" id="fav-import">匯入 JSON</button>
+            <input type="file" id="fav-import-file" accept="application/json,.json" class="hidden" />
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- 圖層面板（Apple 地圖風格） -->
+    <div id="layer-modal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="layer-title">
+      <div class="modal-sheet material">
+        <div class="head-row">
+          <span class="spacer"></span>
+          <h2 id="layer-title">地圖</h2>
+          <button type="button" id="layer-close" class="round-x" aria-label="關閉"><svg><use href="#i-close" /></svg></button>
+        </div>
+        <div class="layer-cards" id="layer-cards" role="radiogroup" aria-label="地圖類型">
+          <button type="button" class="layer-card" role="radio" data-layer="standard" aria-checked="true"><span class="thumb"><img src="/img/layer-standard.svg" alt="" width="200" height="140" decoding="async" /></span><span class="lbl">標準</span></button>
+          <button type="button" class="layer-card" role="radio" data-layer="satellite" aria-checked="false"><span class="thumb"><img src="/img/layer-satellite.svg" alt="" width="200" height="140" decoding="async" /></span><span class="lbl">衛星</span></button>
+          <button type="button" class="layer-card" role="radio" data-layer="terrain" aria-checked="false"><span class="thumb"><img src="/img/layer-terrain.svg" alt="" width="200" height="140" decoding="async" /></span><span class="lbl">地形</span></button>
+          <button type="button" class="layer-card" role="radio" data-layer="transit" aria-checked="false"><span class="thumb"><img src="/img/layer-transit.svg" alt="" width="200" height="140" decoding="async" /></span><span class="lbl">大眾運輸</span></button>
+        </div>
+        <div class="card layer-opts">
+          <div class="opt-block" id="opt-source">
+            <span class="opt-title">衛星來源</span>
+            <div class="src-grid" role="radiogroup" aria-label="衛星來源">
+              <button type="button" role="radio" data-source="amap" aria-checked="true"><b>高德</b><small>預設・最清晰</small></button>
+              <button type="button" role="radio" data-source="tianditu" aria-checked="false" id="src-tianditu"><b>天地圖</b><small>全球影像</small></button>
+              <button type="button" role="radio" data-source="mapbox" aria-checked="false" id="src-mapbox" disabled title="尚未設定 MAPBOX_TOKEN"><b>Mapbox</b><small>需 VPN</small></button>
+              <button type="button" role="radio" data-source="google" aria-checked="false" id="src-google" disabled title="尚未設定 GOOGLE_MAPS_TILE_KEY"><b>Google</b><small>需 VPN</small></button>
+            </div>
+          </div>
+          <p id="opt-sat-vpn-note" class="muted small hidden">Mapbox／Google 衛星在中國大陸常需 VPN 才能載入圖磚。</p>
+          <div class="opt-row">
+            <span>道路與地名標註</span>
+            <button type="button" class="switch" id="opt-labels" role="switch" aria-checked="true" aria-label="道路與地名標註"><i></i></button>
+          </div>
+          <div class="opt-row" id="opt-transit-note">
+            <span class="muted small">大眾運輸圖層：淡化底圖，疊上城市地鐵、輕軌與磁浮線路（依各線顏色）與站名（OpenStreetMap）。</span>
+          </div>
+          <div class="opt-row hidden" id="opt-terrain-note">
+            <span class="muted small" id="terrain-note-text">地形圖：天地圖地形暈渲（ter_w）＋注記（cta_w）。</span>
+          </div>
+        </div>
+        <!-- 全球圖層：天地圖全球衛星、全球地表覆蓋（ESA WorldCover） -->
+        <div id="layer-extra" class="card layer-opts" data-section="global">
+          <div class="opt-row">
+            <div class="opt-text"><span>天地圖全球衛星</span><small class="muted">影像＋地名（img／cia）。境外約 500 m 解析度；中國境內自動平移對齊高德。</small></div>
+            <button type="button" class="switch" id="opt-global-sat" role="switch" aria-checked="false" aria-label="天地圖全球衛星"><i></i></button>
+          </div>
+          <div class="opt-row">
+            <div class="opt-text"><span>全球地表覆蓋</span><small class="muted">森林、農田、水域、建成區等 10 m 分類（ESA WorldCover 2021）。</small></div>
+            <button type="button" class="switch" id="opt-landcover" role="switch" aria-checked="false" aria-label="全球地表覆蓋"><i></i></button>
+          </div>
+          <div id="landcover-legend" class="lc-legend hidden" aria-label="地表覆蓋圖例">
+            <ul id="lc-legend-list"></ul>
+            <p class="muted small" id="lc-attrib"></p>
+          </div>
+        </div>
+        <!-- 熱力圖：人口密度（2020 靜態）、高德即時路況、我的足跡 -->
+        <div id="layer-heat" class="card layer-opts" data-section="heat">
+          <span class="opt-title">熱力圖</span>
+          <div class="opt-row">
+            <div class="opt-text"><span>人口密度</span><small class="muted">2020 年靜態估計，不是即時人流。</small></div>
+            <button type="button" class="switch" id="opt-pop" role="switch" aria-checked="false" aria-label="人口密度熱力"><i></i></button>
+          </div>
+          <div id="pop-extra" class="heat-extra hidden">
+            <label class="heat-slider"><span>透明度</span><input id="pop-opacity" type="range" min="20" max="90" value="70" aria-label="人口密度透明度" /></label>
+            <div id="pop-legend" class="heat-legend" aria-label="人口密度圖例，單位人每平方公里"></div>
+            <p class="muted small" id="pop-note"></p>
+          </div>
+          <div class="opt-row">
+            <div class="opt-text"><span>即時路況</span><small class="muted">高德路況，約每 3 分鐘自動更新。</small></div>
+            <button type="button" class="switch" id="opt-traffic" role="switch" aria-checked="false" aria-label="即時路況"><i></i></button>
+          </div>
+          <div id="traffic-legend" class="heat-legend hidden" aria-label="路況圖例"></div>
+          <div class="opt-row">
+            <div class="opt-text"><span>我的足跡</span><small class="muted">只顯示你自己的位置紀錄。</small></div>
+            <button type="button" class="switch" id="opt-foot" role="switch" aria-checked="false" aria-label="我的足跡熱力"><i></i></button>
+          </div>
+          <div id="foot-extra" class="heat-extra hidden">
+            <div id="foot-login" class="heat-login">
+              <p>登入後才能記錄與查看自己的足跡。未登入不會顯示這層，也不會記錄位置。</p>
+              <button type="button" class="btn-fill" id="foot-login-btn">登入</button>
+            </div>
+            <div id="foot-tools" class="hidden">
+              <div class="opt-row">
+                <div class="opt-text"><span>記錄足跡</span><small class="muted" id="foot-bg-note"></small></div>
+                <button type="button" class="switch" id="opt-foot-rec" role="switch" aria-checked="false" aria-label="記錄足跡"><i></i></button>
+              </div>
+              <div class="seg-ctl foot-range" id="foot-range" role="radiogroup" aria-label="足跡時間範圍">
+                <button type="button" role="radio" data-range="day" aria-checked="false">今天</button>
+                <button type="button" role="radio" data-range="7d" aria-checked="true">7 天</button>
+                <button type="button" role="radio" data-range="30d" aria-checked="false">30 天</button>
+                <button type="button" role="radio" data-range="all" aria-checked="false">全部</button>
+              </div>
+              <p class="muted small" id="foot-privacy"></p>
+              <button type="button" class="btn-tint danger" id="foot-clear">清除我的足跡</button>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 分享位置 -->
+    <div id="share-modal" class="modal hidden" role="dialog" aria-modal="true" aria-labelledby="share-title">
+      <div class="modal-sheet material">
+        <div class="head-row">
+          <span class="spacer"></span>
+          <h2 id="share-title">分享位置</h2>
+          <button type="button" id="share-close" class="round-x" aria-label="關閉"><svg><use href="#i-close" /></svg></button>
+        </div>
+        <p id="share-name" class="muted center"></p>
+        <input id="share-link" type="text" readonly aria-label="分享連結" />
+        <div class="btn-row wrap">
+          <button type="button" class="btn-fill" id="share-native">分享…</button>
+          <a class="btn-tint" id="share-sms" href="#">簡訊</a>
+          <button type="button" class="btn-tint" id="share-copy">複製連結</button>
+        </div>
+        <p class="muted small">「分享…」可選微信、QQ、iMessage、備忘錄等。對方點開連結會在高德地圖看到這個位置（不用安裝 App）。</p>
+        <button type="button" class="link-btn hidden" id="share-clear">移除地圖上的標記</button>
+      </div>
+    </div>
+
+    <div id="toast" class="toast" role="alert" aria-live="assertive"></div>
+
+    <script type="module" src="/js/app.js"></script>
+  </body>
+</html>
